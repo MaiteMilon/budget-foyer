@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getHouseholdActivity, inviteLink, createInvite } from '../lib/household.js';
+import { getHouseholdActivity, inviteLink, createInvite, getActiveInvite } from '../lib/household.js';
 import { useApp } from '../context/AppContext.jsx';
 import {
   getHouseholdMembers,
@@ -53,20 +53,24 @@ export default function Foyer() {
   const [activity, setActivity] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
+  const [activeInvite, setActiveInvite] = useState(null);
   const [inviteMsg, setInviteMsg] = useState('');
+  const [generatingInvite, setGeneratingInvite] = useState(false);
 
   async function load() {
     setLoading(true);
     setLoadError(null);
     try {
-      const [householdMembers, householdPockets, activityLog] = await Promise.all([
+      const [householdMembers, householdPockets, activityLog, invite] = await Promise.all([
         getHouseholdMembers(profile.household_id),
         getHouseholdPockets(profile.household_id),
         getHouseholdActivity(profile.household_id),
+        getActiveInvite(profile.household_id),
       ]);
       setMembers(householdMembers);
       setPockets(householdPockets);
       setActivity(activityLog);
+      setActiveInvite(invite);
 
       const budgets = await Promise.all(
         householdMembers.map((m) => loadMemberBudget(m, currentBudgetMonth.month))
@@ -82,9 +86,20 @@ export default function Foyer() {
   useEffect(() => { load(); }, [profile.household_id, currentBudgetMonth.month]);
 
   async function handleNewInvite() {
-    const invite = await createInvite(profile.household_id, profile.id);
-    await navigator.clipboard?.writeText(inviteLink(invite.code));
-    setInviteMsg(`Lien copié — code ${invite.code}`);
+    setGeneratingInvite(true);
+    setInviteMsg('');
+    try {
+      const invite = await createInvite(profile.household_id, profile.id);
+      setActiveInvite(invite);
+    } finally {
+      setGeneratingInvite(false);
+    }
+  }
+
+  async function handleCopyInvite() {
+    if (!activeInvite) return;
+    await navigator.clipboard?.writeText(inviteLink(activeInvite.code));
+    setInviteMsg('Lien copié !');
   }
 
   if (loadError) {
@@ -114,6 +129,48 @@ export default function Foyer() {
           Revenus, dépenses et épargne cumulés des deux membres.
         </p>
       </header>
+
+      {members.length < 2 && (
+        <section className="bg-white rounded-card p-5 shadow-sm">
+          <h2 className="font-semibold mb-1">Inviter l'autre membre du foyer</h2>
+          <p className="text-xs text-ink/50 mb-3">
+            Le lien expire après 7 jours — régénérez-en un nouveau s'il ne fonctionne plus.
+          </p>
+
+          {activeInvite ? (
+            <>
+              <div className="bg-teal-light rounded-2xl p-4 text-center mb-3">
+                <p className="text-xs text-ink/50 mb-1">Code d'invitation</p>
+                <p className="text-3xl font-extrabold tracking-widest text-teal">{activeInvite.code}</p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleCopyInvite}
+                  className="flex-1 bg-teal text-white text-sm font-semibold rounded-xl py-3"
+                >
+                  Copier le lien
+                </button>
+                <button
+                  onClick={handleNewInvite}
+                  disabled={generatingInvite}
+                  className="flex-1 bg-white border border-teal-light text-teal text-sm font-semibold rounded-xl py-3 disabled:opacity-50"
+                >
+                  {generatingInvite ? '…' : 'Nouveau code'}
+                </button>
+              </div>
+            </>
+          ) : (
+            <button
+              onClick={handleNewInvite}
+              disabled={generatingInvite}
+              className="w-full bg-teal text-white font-semibold rounded-card py-3 disabled:opacity-50"
+            >
+              {generatingInvite ? 'Génération…' : "Générer un code d'invitation"}
+            </button>
+          )}
+          {inviteMsg && <p className="text-xs text-teal text-center mt-2">{inviteMsg}</p>}
+        </section>
+      )}
 
       {householdView ? (
         <section className="bg-teal text-white rounded-card p-6 shadow-sm space-y-3">
@@ -176,13 +233,7 @@ export default function Foyer() {
       </section>
 
       <section className="bg-white rounded-card p-5 shadow-sm">
-        <div className="flex justify-between items-center mb-3">
-          <h2 className="font-semibold">Historique des actions communes</h2>
-          <button onClick={handleNewInvite} className="text-xs text-teal underline">
-            Inviter
-          </button>
-        </div>
-        {inviteMsg && <p className="text-xs text-teal mb-2">{inviteMsg}</p>}
+        <h2 className="font-semibold mb-3">Historique des actions communes</h2>
 
         <ul className="space-y-3">
           {activity.map((entry) => (
