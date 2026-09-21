@@ -59,7 +59,7 @@ export async function joinHouseholdWithCode(code) {
   });
   if (error) {
     if (error.message?.includes('invite_invalid_or_expired')) {
-      throw new Error('Ce code est invalide ou a expiré. Demandez un nouveau lien à l'autre membre du foyer.');
+      throw new Error("Ce code est invalide ou a expiré. Demandez un nouveau lien à l'autre membre du foyer.");
     }
     throw error;
   }
