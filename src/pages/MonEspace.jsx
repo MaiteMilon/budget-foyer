@@ -48,7 +48,7 @@ export default function MonEspace() {
         <div>
           <h1 className="text-2xl font-bold">Mon espace</h1>
           <p className="text-ink/60 text-sm mt-1">
-            Tes envies d'achat sont privées — ton conjoint ne les voit jamais.
+            Tes envies d'achat sont privées — personne d'autre dans le foyer ne les voit.
           </p>
         </div>
         <button
