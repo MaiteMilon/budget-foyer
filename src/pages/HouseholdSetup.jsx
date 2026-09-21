@@ -52,7 +52,7 @@ export default function HouseholdSetup() {
     return (
       <div className="min-h-screen flex flex-col justify-center px-6 max-w-md mx-auto space-y-5">
         <h1 className="text-2xl font-bold">Votre foyer est créé 🎉</h1>
-        <p className="text-ink/60">Partagez ce code ou ce lien avec votre conjoint pour qu'il·elle rejoigne le foyer.</p>
+        <p className="text-ink/60">Partagez ce code ou ce lien avec l'autre membre du foyer pour qu'il·elle le rejoigne.</p>
 
         <div className="bg-white rounded-card p-6 text-center shadow-sm">
           <p className="text-xs text-ink/50 mb-1">Code d'invitation</p>
@@ -73,7 +73,7 @@ export default function HouseholdSetup() {
           Continuer sans attendre
         </button>
         <p className="text-xs text-center text-ink/40">
-          Le code reste valable 7 jours ; votre conjoint pourra le saisir plus tard.
+          Le code reste valable 7 jours ; il pourra être saisi plus tard.
         </p>
       </div>
     );
@@ -83,7 +83,7 @@ export default function HouseholdSetup() {
     return (
       <div className="min-h-screen flex flex-col justify-center px-6 max-w-md mx-auto space-y-5">
         <h1 className="text-2xl font-bold">Rejoindre un foyer</h1>
-        <p className="text-ink/60">Entrez le code reçu de votre conjoint.</p>
+        <p className="text-ink/60">Entrez le code reçu de l'autre membre du foyer.</p>
         <form onSubmit={handleJoin} className="space-y-3">
           <input
             value={code}
@@ -113,7 +113,7 @@ export default function HouseholdSetup() {
   return (
     <div className="min-h-screen flex flex-col justify-center px-6 max-w-md mx-auto space-y-4">
       <h1 className="text-2xl font-bold">Bienvenue {profile?.display_name} 👋</h1>
-      <p className="text-ink/60 mb-2">Pour commencer, créez votre foyer ou rejoignez celui de votre conjoint.</p>
+      <p className="text-ink/60 mb-2">Pour commencer, créez votre foyer ou rejoignez-en un existant.</p>
 
       <button
         onClick={handleCreate}
