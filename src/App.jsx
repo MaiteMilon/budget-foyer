@@ -34,6 +34,11 @@ export default function App() {
 
   return (
     <div className="min-h-full flex flex-col max-w-md mx-auto">
+      <header className="flex items-center gap-2 px-4 py-3 bg-white border-b border-teal-light">
+        <img src="/icon-192.png" alt="" className="w-7 h-7 rounded-lg" />
+        <span className="font-bold text-teal">Budget Foyer</span>
+      </header>
+
       <main className="flex-1 pb-24 px-4 pt-6">
         <Routes>
           <Route path="/" element={<Dashboard />} />
