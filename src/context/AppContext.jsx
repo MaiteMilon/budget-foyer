@@ -12,43 +12,59 @@ function currentMonthISO() {
 
 export function AppProvider({ children }) {
   const [state, setState] = useState({
-    status: 'loading', // loading | signed_out | needs_household | ready
+    status: 'loading', // loading | signed_out | needs_household | ready | error
     session: null,
     profile: null,
     currentBudgetMonth: null,
+    errorMessage: null,
   });
 
   const loadForSession = useCallback(async (session) => {
     if (!session) {
-      setState({ status: 'signed_out', session: null, profile: null, currentBudgetMonth: null });
+      setState({ status: 'signed_out', session: null, profile: null, currentBudgetMonth: null, errorMessage: null });
       return;
     }
 
-    const { data: profile, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', session.user.id)
-      .maybeSingle();
+    try {
+      const { data: profile, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', session.user.id)
+        .maybeSingle();
 
-    if (error || !profile) {
-      // Session valide mais profil pas encore créé — typiquement juste
-      // après avoir cliqué le lien de confirmation d'e-mail. On tente de
-      // le créer automatiquement avec le prénom mis de côté au moment de
-      // l'inscription (voir auth.js) plutôt que de bloquer l'utilisateur.
-      try {
-        const created = await ensureProfileExists();
-        if (created) {
-          await routeFromProfile(session, created);
-          return;
+      if (error) throw error;
+
+      if (!profile) {
+        // Session valide mais profil pas encore créé — typiquement juste
+        // après avoir cliqué le lien de confirmation d'e-mail. On tente de
+        // le créer automatiquement avec le prénom mis de côté au moment de
+        // l'inscription (voir auth.js) plutôt que de bloquer l'utilisateur.
+        try {
+          const created = await ensureProfileExists();
+          if (created) {
+            await routeFromProfile(session, created);
+            return;
+          }
+        } catch {
+          // pas grave : on retombe sur l'écran de connexion ci-dessous
         }
-      } catch {
-        // pas grave : on retombe sur l'écran de connexion ci-dessous
+        setState({ status: 'signed_out', session, profile: null, currentBudgetMonth: null, errorMessage: null });
+        return;
       }
-      setState({ status: 'signed_out', session, profile: null, currentBudgetMonth: null });
-      return;
-    }
 
-    await routeFromProfile(session, profile);
+      await routeFromProfile(session, profile);
+    } catch (err) {
+      // Avant : une erreur ici restait invisible et l'app bloquait
+      // indéfiniment sur "Chargement…". Désormais le message exact
+      // s'affiche, pour pouvoir diagnostiquer au lieu de deviner.
+      setState({
+        status: 'error',
+        session,
+        profile: null,
+        currentBudgetMonth: null,
+        errorMessage: err.message || String(err),
+      });
+    }
   }, []);
 
   async function routeFromProfile(session, profile) {
