@@ -20,10 +20,27 @@ const NAV_ITEMS = [
 ];
 
 export default function App() {
-  const { status } = useApp();
+  const { status, errorMessage, refresh } = useApp();
 
   if (status === 'loading') {
     return <p className="text-center text-ink/50 mt-20">Chargement…</p>;
+  }
+  if (status === 'error') {
+    return (
+      <div className="min-h-screen flex flex-col justify-center items-center px-6 text-center gap-3">
+        <p className="text-4xl">⚠️</p>
+        <p className="font-semibold">Une erreur a empêché le chargement</p>
+        <p className="text-sm text-coral bg-coral-light rounded-xl px-4 py-3 max-w-sm break-words">
+          {errorMessage}
+        </p>
+        <button
+          onClick={refresh}
+          className="mt-2 bg-teal text-white font-semibold rounded-card px-6 py-3"
+        >
+          Réessayer
+        </button>
+      </div>
+    );
   }
   if (status === 'signed_out') {
     return <Auth />;
