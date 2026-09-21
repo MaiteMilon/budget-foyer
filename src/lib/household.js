@@ -37,6 +37,21 @@ export function inviteLink(code) {
   return `${window.location.origin}/rejoindre?code=${code}`;
 }
 
+/** Le code d'invitation actif (non utilisé, non expiré) le plus récent du foyer, s'il y en a un. */
+export async function getActiveInvite(householdId) {
+  const { data, error } = await supabase
+    .from('household_invites')
+    .select('*')
+    .eq('household_id', householdId)
+    .is('used_at', null)
+    .gt('expires_at', new Date().toISOString())
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
 /** Rejoint un foyer via le code — toute la validation se fait côté base (RPC SECURITY DEFINER). */
 export async function joinHouseholdWithCode(code) {
   const { data, error } = await supabase.rpc('accept_household_invite', {
@@ -44,7 +59,7 @@ export async function joinHouseholdWithCode(code) {
   });
   if (error) {
     if (error.message?.includes('invite_invalid_or_expired')) {
-      throw new Error('Ce code est invalide ou a expiré. Demandez un nouveau lien à votre conjoint.');
+      throw new Error('Ce code est invalide ou a expiré. Demandez un nouveau lien à l'autre membre du foyer.');
     }
     throw error;
   }
