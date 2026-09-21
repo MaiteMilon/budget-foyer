@@ -16,6 +16,7 @@ import {
 export default function Dashboard() {
   const { profile, currentBudgetMonth, refresh } = useApp();
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const [budget, setBudget] = useState(null);
   const [goals, setGoals] = useState([]);
   const [pocketsWithTarget, setPocketsWithTarget] = useState([]);
@@ -28,42 +29,47 @@ export default function Dashboard() {
     async function load() {
       if (!currentBudgetMonth) return;
       setLoading(true);
-      const [incomes, monthGoals, charges, expenses, pockets] = await Promise.all([
-        getMonthIncomes(currentBudgetMonth.id),
-        getMonthSavingsGoals(currentBudgetMonth.id),
-        getMonthFixedCharges(currentBudgetMonth.id),
-        getMonthExpenses(currentBudgetMonth.id, profile.id),
-        getHouseholdPockets(profile.household_id),
-      ]);
-      if (cancelled) return;
+      setLoadError(null);
+      try {
+        const [incomes, monthGoals, charges, expenses, pockets] = await Promise.all([
+          getMonthIncomes(currentBudgetMonth.id),
+          getMonthSavingsGoals(currentBudgetMonth.id),
+          getMonthFixedCharges(currentBudgetMonth.id),
+          getMonthExpenses(currentBudgetMonth.id, profile.id),
+          getHouseholdPockets(profile.household_id),
+        ]);
+        if (cancelled) return;
 
-      setBudget(
-        computeMonthlyBudget({
-          safetyMargin: currentBudgetMonth.safety_margin,
-          incomes,
-          savingsGoals: monthGoals.map((g) => ({ plannedAmount: g.planned_amount })),
-          fixedCharges: charges,
-          expenses: expenses.map((e) => ({ amount: e.amount, sourceType: e.source_type, pocketUsageType: e.source_pocket?.usage_type })),
-        })
-      );
-      setGoals(
-        monthGoals.map((g) => ({
-          pocket: g.pocket,
-          plannedAmount: g.planned_amount,
-          actualPaidIn: g.actual_paid_in,
-        }))
-      );
-      setPocketsWithTarget(pockets.filter((p) => p.target_amount && Number(p.target_amount) > 0 && p.usage_type !== 'depense'));
-      setDepenseAccounts(pockets.filter((p) => p.usage_type === 'depense'));
+        setBudget(
+          computeMonthlyBudget({
+            safetyMargin: currentBudgetMonth.safety_margin,
+            incomes,
+            savingsGoals: monthGoals.map((g) => ({ plannedAmount: g.planned_amount })),
+            fixedCharges: charges,
+            expenses: expenses.map((e) => ({ amount: e.amount, sourceType: e.source_type, pocketUsageType: e.source_pocket?.usage_type })),
+          })
+        );
+        setGoals(
+          monthGoals.map((g) => ({
+            pocket: g.pocket,
+            plannedAmount: g.planned_amount,
+            actualPaidIn: g.actual_paid_in,
+          }))
+        );
+        setPocketsWithTarget(pockets.filter((p) => p.target_amount && Number(p.target_amount) > 0 && p.usage_type !== 'depense'));
+        setDepenseAccounts(pockets.filter((p) => p.usage_type === 'depense'));
 
-      const spentMap = new Map();
-      expenses.forEach((e) => {
-        if (!e.source_pocket_id) return;
-        spentMap.set(e.source_pocket_id, (spentMap.get(e.source_pocket_id) || 0) + Number(e.amount));
-      });
-      setSpentByPocket(spentMap);
-
-      setLoading(false);
+        const spentMap = new Map();
+        expenses.forEach((e) => {
+          if (!e.source_pocket_id) return;
+          spentMap.set(e.source_pocket_id, (spentMap.get(e.source_pocket_id) || 0) + Number(e.amount));
+        });
+        setSpentByPocket(spentMap);
+      } catch (err) {
+        if (!cancelled) setLoadError(err.message || String(err));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     }
     load();
     return () => { cancelled = true; };
@@ -87,6 +93,16 @@ export default function Dashboard() {
     checkNextMonth();
     return () => { cancelled = true; };
   }, [currentBudgetMonth, profile]);
+
+  if (loadError) {
+    return (
+      <div className="text-center mt-20 px-4">
+        <p className="text-4xl mb-2">⚠️</p>
+        <p className="font-semibold mb-2">Impossible de charger l'Accueil</p>
+        <p className="text-sm text-coral bg-coral-light rounded-xl px-4 py-3 break-words">{loadError}</p>
+      </div>
+    );
+  }
 
   if (loading || !budget) {
     return <p className="text-center text-ink/50 mt-20">Chargement…</p>;
