@@ -294,14 +294,27 @@ Ce qui en découle concrètement :
 - Les noms de compte restent **toujours saisis librement** par chaque
   utilisateur — rien n'est suggéré ni codé en dur.
 
-## 14. Prochaines étapes (par ordre de priorité proposé)
+## 14. Compte de prélèvement sur les charges fixes
+
+- Chaque charge peut désormais avoir un **compte de prélèvement**
+  optionnel (`Charges.jsx`). Comme pour l'épargne, on distingue **prévu**
+  (la charge, déjà réservée dans le budget dès sa création — inchangé) et
+  **réellement payé** (case "Payée ce mois-ci") : cocher cette case
+  décompte alors le solde réel du compte associé, sans jamais retoucher
+  au budget disponible (déjà réservé en amont — pas de double-comptage).
+  Décocher annule exactement le même montant en sens inverse.
+- Le compte choisi sur le gabarit se propage automatiquement aux mois
+  suivants quand la charge y est suggérée ; il reste modifiable
+  indépendamment "pour ce mois uniquement", comme le montant.
+
+## 15. Prochaines étapes (par ordre de priorité proposé)
 
 1. **Notifications** (§16) : Web Push via le service worker déjà généré
    par `vite-plugin-pwa`, déclenchées par des fonctions Supabase Edge sur
    les seuils (50 % du budget, délai de réflexion terminé, etc.).
 2. **Export CSV/PDF** (§20).
 
-## 15. Pour tester à deux dès maintenant
+## 16. Pour tester à deux dès maintenant
 
 1. Créer un projet Supabase, exécuter `supabase/schema.sql` dans son
    éditeur SQL, renseigner `.env` (voir §5).

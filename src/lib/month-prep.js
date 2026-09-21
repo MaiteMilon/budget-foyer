@@ -123,6 +123,7 @@ export async function saveMonthPreparation({
         category: e.category,
         amount: e.amount,
         due_date: e.dueDate || null,
+        source_pocket_id: e.sourcePocketId || null,
       }))
     );
     if (insChargesError) throw insChargesError;

@@ -124,6 +124,11 @@ create table fixed_charges (
   due_day smallint check (due_day between 1 and 31),
   one_off_date date, -- date précise pour une charge ponctuelle
   is_active boolean not null default true, -- charge mise en pause sans perdre son historique
+  -- Compte prévu pour le prélèvement (optionnel). Ne change RIEN au
+  -- calcul du budget disponible (déjà réservé via la charge elle-même,
+  -- §6) — sert uniquement, une fois la charge marquée "payée" sur
+  -- fixed_charge_entries, à décompter le solde réel de ce compte.
+  source_pocket_id uuid references savings_pockets (id),
   created_at timestamptz not null default now()
 );
 
@@ -141,6 +146,10 @@ create table fixed_charge_entries (
   amount numeric(10,2) not null,
   due_date date,
   is_paid boolean not null default false,
+  -- Copié depuis le gabarit à la création de l'entrée, éditable
+  -- indépendamment ensuite (même logique que le montant : "ce mois
+  -- uniquement" ne touche jamais le gabarit).
+  source_pocket_id uuid references savings_pockets (id),
   created_at timestamptz not null default now()
 );
 
@@ -666,6 +675,11 @@ begin
       check (usage_type in ('depense','epargne'));
   end if;
 end $$;
+
+-- Compte prévu de prélèvement pour une charge fixe (§ "les charges
+-- fixes, quand je les ajoute, est-ce qu'on choisit le compte").
+alter table fixed_charges add column if not exists source_pocket_id uuid references savings_pockets (id);
+alter table fixed_charge_entries add column if not exists source_pocket_id uuid references savings_pockets (id);
 
 do $$
 begin

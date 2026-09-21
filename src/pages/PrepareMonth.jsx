@@ -120,6 +120,7 @@ export default function PrepareMonth() {
             isRecurring: Boolean(c.fixed_charge_id),
             isShared: false,
             fixedChargeId: c.fixed_charge_id,
+            sourcePocketId: c.source_pocket_id || '',
             dueDate: c.due_date || '',
           }))
         );
@@ -133,6 +134,7 @@ export default function PrepareMonth() {
             isRecurring: true,
             isShared: t.is_shared,
             fixedChargeId: t.id,
+            sourcePocketId: t.source_pocket_id || '',
             dueDate: '',
           }))
         );
@@ -244,6 +246,7 @@ export default function PrepareMonth() {
             isRecurring: c.isRecurring,
             isShared: c.isShared,
             fixedChargeId: c.fixedChargeId,
+            sourcePocketId: c.sourcePocketId || null,
             dueDate: c.dueDate || null,
           })),
         savingsGoals: goals.map((g) => ({

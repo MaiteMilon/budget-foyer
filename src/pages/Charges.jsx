@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useApp } from '../context/AppContext.jsx';
+import { getHouseholdPockets } from '../lib/data.js';
 import {
   getMyCharges,
   getCurrentMonthEntriesByCharge,
@@ -9,6 +10,7 @@ import {
   upsertCurrentMonthEntry,
   removeCurrentMonthEntry,
   logSharedChargeAction,
+  setEntryPaid,
 } from '../lib/charges.js';
 
 const CATEGORIES = [
@@ -26,6 +28,7 @@ function emptyForm() {
     dueDay: '5',
     oneOffDate: new Date().toISOString().slice(0, 10),
     isActive: true,
+    sourcePocketId: '',
   };
 }
 
@@ -42,6 +45,7 @@ export default function Charges() {
   const { profile, currentBudgetMonth, refresh } = useApp();
   const [charges, setCharges] = useState([]);
   const [entriesByCharge, setEntriesByCharge] = useState(new Map());
+  const [accounts, setAccounts] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const [formOpen, setFormOpen] = useState(false);
@@ -53,12 +57,14 @@ export default function Charges() {
 
   async function load() {
     setLoading(true);
-    const [chargesList, entries] = await Promise.all([
+    const [chargesList, entries, accountsList] = await Promise.all([
       getMyCharges(profile.household_id, profile.id),
       getCurrentMonthEntriesByCharge(currentBudgetMonth.id),
+      getHouseholdPockets(profile.household_id),
     ]);
     setCharges(chargesList);
     setEntriesByCharge(entries);
+    setAccounts(accountsList);
     setLoading(false);
   }
 
@@ -87,6 +93,7 @@ export default function Charges() {
       dueDay: String(charge.due_day || 5),
       oneOffDate: charge.one_off_date || new Date().toISOString().slice(0, 10),
       isActive: charge.is_active,
+      sourcePocketId: charge.source_pocket_id || '',
     });
     setFormOpen(true);
   }
@@ -102,6 +109,7 @@ export default function Charges() {
     setError('');
     try {
       const amount = Number(String(currentForm.amount).replace(',', '.')) || 0;
+      const sourcePocketId = currentForm.sourcePocketId || null;
       let charge = editingCharge;
 
       if (!charge) {
@@ -116,6 +124,7 @@ export default function Charges() {
           due_day: currentForm.isRecurring ? Number(currentForm.dueDay) : null,
           one_off_date: currentForm.isRecurring ? null : currentForm.oneOffDate,
           is_active: currentForm.isActive,
+          source_pocket_id: sourcePocketId,
         });
       } else if (scope === 'future' || !charge.is_recurring) {
         charge = await updateChargeTemplate(charge.id, {
@@ -127,6 +136,7 @@ export default function Charges() {
           due_day: currentForm.isRecurring ? Number(currentForm.dueDay) : null,
           one_off_date: currentForm.isRecurring ? null : currentForm.oneOffDate,
           is_active: currentForm.isActive,
+          source_pocket_id: sourcePocketId,
         });
       } else {
         if (charge.is_shared) {
@@ -144,6 +154,7 @@ export default function Charges() {
           label: currentForm.label,
           category: currentForm.category,
           dueDate: currentForm.isRecurring ? null : currentForm.oneOffDate,
+          sourcePocketId,
         });
       } else {
         await removeCurrentMonthEntry(currentBudgetMonth.id, charge.id);
@@ -181,10 +192,25 @@ export default function Charges() {
           label: charge.label,
           category: charge.category,
           dueDate: charge.is_recurring ? null : charge.one_off_date,
+          sourcePocketId: charge.source_pocket_id,
         });
       } else {
         await removeCurrentMonthEntry(currentBudgetMonth.id, charge.id);
       }
+      await load();
+      await refresh();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleTogglePaid(entry) {
+    setSaving(true);
+    setError('');
+    try {
+      await setEntryPaid(entry, !entry.is_paid);
       await load();
       await refresh();
     } catch (err) {
@@ -239,6 +265,7 @@ export default function Charges() {
           form={form}
           setForm={setForm}
           categories={CATEGORIES}
+          accounts={accounts}
           isEditing={Boolean(editingCharge)}
           onCancel={closeForm}
           onSubmit={handleSubmit}
@@ -280,6 +307,7 @@ export default function Charges() {
         onEdit={openEdit}
         onDelete={handleDelete}
         onToggleActive={handleToggleActive}
+        onTogglePaid={handleTogglePaid}
       />
       <ChargeGroup
         title="Mes charges personnelles"
@@ -288,12 +316,13 @@ export default function Charges() {
         onEdit={openEdit}
         onDelete={handleDelete}
         onToggleActive={handleToggleActive}
+        onTogglePaid={handleTogglePaid}
       />
     </div>
   );
 }
 
-function ChargeGroup({ title, charges, entriesByCharge, onEdit, onDelete, onToggleActive }) {
+function ChargeGroup({ title, charges, entriesByCharge, onEdit, onDelete, onToggleActive, onTogglePaid }) {
   const active = charges.filter((c) => c.is_active);
   const inactive = charges.filter((c) => !c.is_active);
 
@@ -304,7 +333,7 @@ function ChargeGroup({ title, charges, entriesByCharge, onEdit, onDelete, onTogg
 
       <ul className="space-y-2">
         {active.map((c) => (
-          <ChargeRow key={c.id} charge={c} entry={entriesByCharge.get(c.id)} onEdit={onEdit} onDelete={onDelete} onToggleActive={onToggleActive} />
+          <ChargeRow key={c.id} charge={c} entry={entriesByCharge.get(c.id)} onEdit={onEdit} onDelete={onDelete} onToggleActive={onToggleActive} onTogglePaid={onTogglePaid} />
         ))}
       </ul>
 
@@ -315,7 +344,7 @@ function ChargeGroup({ title, charges, entriesByCharge, onEdit, onDelete, onTogg
           </summary>
           <ul className="space-y-2 mt-2">
             {inactive.map((c) => (
-              <ChargeRow key={c.id} charge={c} entry={entriesByCharge.get(c.id)} onEdit={onEdit} onDelete={onDelete} onToggleActive={onToggleActive} dimmed />
+              <ChargeRow key={c.id} charge={c} entry={entriesByCharge.get(c.id)} onEdit={onEdit} onDelete={onDelete} onToggleActive={onToggleActive} onTogglePaid={onTogglePaid} dimmed />
             ))}
           </ul>
         </details>
@@ -324,7 +353,7 @@ function ChargeGroup({ title, charges, entriesByCharge, onEdit, onDelete, onTogg
   );
 }
 
-function ChargeRow({ charge, entry, onEdit, onDelete, onToggleActive, dimmed }) {
+function ChargeRow({ charge, entry, onEdit, onDelete, onToggleActive, onTogglePaid, dimmed }) {
   const displayedAmount = entry ? entry.amount : charge.default_amount;
   const overridden = entry && Number(entry.amount) !== Number(charge.default_amount);
 
@@ -354,11 +383,26 @@ function ChargeRow({ charge, entry, onEdit, onDelete, onToggleActive, dimmed }) 
           <button onClick={() => onDelete(charge)} className="text-coral font-medium">Supprimer</button>
         </div>
       </div>
+      {entry && (
+        <div className="mt-2 pt-2 border-t border-teal-light/60 flex justify-between items-center">
+          <label className="flex items-center gap-1.5 text-xs text-ink/60">
+            <input
+              type="checkbox"
+              checked={entry.is_paid}
+              onChange={() => onTogglePaid(entry)}
+            />
+            Payée ce mois-ci
+          </label>
+          {entry.source_pocket_id && (
+            <span className="text-xs text-ink/40">Prélevée sur un compte suivi</span>
+          )}
+        </div>
+      )}
     </li>
   );
 }
 
-function ChargeForm({ form, setForm, categories, isEditing, onCancel, onSubmit, saving }) {
+function ChargeForm({ form, setForm, categories, accounts, isEditing, onCancel, onSubmit, saving }) {
   return (
     <form onSubmit={onSubmit} className="bg-white rounded-card p-5 shadow-sm space-y-3">
       <h2 className="font-semibold">{isEditing ? 'Modifier la charge' : 'Nouvelle charge'}</h2>
@@ -390,6 +434,23 @@ function ChargeForm({ form, setForm, categories, isEditing, onCancel, onSubmit, 
         >
           {categories.map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
+      </div>
+
+      <div>
+        <label className="text-xs text-ink/60">Compte de prélèvement (optionnel)</label>
+        <select
+          value={form.sourcePocketId}
+          onChange={(e) => setForm({ ...form, sourcePocketId: e.target.value })}
+          className="w-full mt-1 bg-cream rounded-xl px-3 py-2 border border-teal-light text-sm"
+        >
+          <option value="">Non suivi (juste réservé dans le budget)</option>
+          {accounts.map((a) => (
+            <option key={a.id} value={a.id}>{a.icon} {a.name}</option>
+          ))}
+        </select>
+        <p className="text-xs text-ink/40 mt-1">
+          Ne change rien au budget réservé — sert seulement à décompter le solde réel de ce compte une fois la charge cochée "payée".
+        </p>
       </div>
 
       <div className="flex gap-4 text-sm">

@@ -75,7 +75,7 @@ export async function deleteChargeTemplate(chargeId) {
  * et derrière la mise à jour immédiate du budget quand on ajoute/édite
  * une charge en cours de mois.
  */
-export async function upsertCurrentMonthEntry(budgetMonthId, charge, { amount, label, category, dueDate }) {
+export async function upsertCurrentMonthEntry(budgetMonthId, charge, { amount, label, category, dueDate, sourcePocketId }) {
   const { data: existing } = await supabase
     .from('fixed_charge_entries')
     .select('id')
@@ -86,7 +86,7 @@ export async function upsertCurrentMonthEntry(budgetMonthId, charge, { amount, l
   if (existing) {
     const { data, error } = await supabase
       .from('fixed_charge_entries')
-      .update({ label, category, amount, due_date: dueDate })
+      .update({ label, category, amount, due_date: dueDate, source_pocket_id: sourcePocketId ?? null })
       .eq('id', existing.id)
       .select()
       .single();
@@ -103,11 +103,36 @@ export async function upsertCurrentMonthEntry(budgetMonthId, charge, { amount, l
       category,
       amount,
       due_date: dueDate,
+      source_pocket_id: sourcePocketId ?? null,
     })
     .select()
     .single();
   if (error) throw error;
   return data;
+}
+
+/**
+ * Coche/décoche une charge comme réellement payée. Ne touche JAMAIS au
+ * budget disponible (déjà réservé via la charge elle-même) — décompte
+ * uniquement, si un compte est associé, le solde réel de ce compte, dans
+ * un sens ou dans l'autre selon l'état visé. Même principe que le
+ * "réellement versé" de l'épargne (§3) : prévu ≠ effectif.
+ */
+export async function setEntryPaid(entry, isPaid) {
+  const { error } = await supabase
+    .from('fixed_charge_entries')
+    .update({ is_paid: isPaid })
+    .eq('id', entry.id);
+  if (error) throw error;
+
+  if (entry.source_pocket_id) {
+    const delta = isPaid ? Number(entry.amount) : -Number(entry.amount);
+    const { error: rpcError } = await supabase.rpc('decrement_pocket_balance', {
+      pocket_id: entry.source_pocket_id,
+      delta,
+    });
+    if (rpcError) throw rpcError;
+  }
 }
 
 /** Retire une charge du mois EN COURS uniquement (désactivation) — les autres mois ne sont pas touchés. */
