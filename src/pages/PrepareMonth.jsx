@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useApp } from '../context/AppContext.jsx';
 import { computeMonthlyBudget } from '../lib/budget-engine.js';
 import { monthLabel } from '../lib/date-utils.js';
+import QuickAddPocketForm, { POCKET_KINDS } from '../components/QuickAddPocketForm.jsx';
 import {
   getOrCreateBudgetMonth,
   getMonthIncomes,
@@ -27,16 +28,6 @@ const INCOME_KINDS = [
 const CHARGE_CATEGORIES = [
   'téléphone', 'assurance', 'abonnement', 'transport', 'crédit',
   'école', 'logement', 'énergie', 'internet', 'mutuelle', 'autre',
-];
-
-const POCKET_KINDS = [
-  { id: 'compte_joint', label: 'Compte joint', icon: '🏦' },
-  { id: 'tirelire', label: 'Tirelire / espèces', icon: '🐷' },
-  { id: 'epargne', label: 'Compte épargne', icon: '💶' },
-  { id: 'vacances', label: 'Vacances', icon: '🏖️' },
-  { id: 'precaution', label: 'Épargne de précaution', icon: '🛟' },
-  { id: 'projet', label: 'Projet particulier', icon: '🎯' },
-  { id: 'autre', label: 'Autre', icon: '➕' },
 ];
 
 function uid() {
@@ -149,13 +140,15 @@ export default function PrepareMonth() {
 
       const existingGoalByPocket = new Map(existingGoals.map((g) => [g.pocket_id, g.planned_amount]));
       setGoals(
-        householdPockets.map((p) => ({
-          pocketId: p.id,
-          pocket: p,
-          plannedAmount: String(
-            existingGoalByPocket.get(p.id) ?? prevGoalsByPocket.get(p.id) ?? 0
-          ),
-        }))
+        householdPockets
+          .filter((p) => p.usage_type !== 'depense') // un compte "dépense" n'a pas de réservation mensuelle
+          .map((p) => ({
+            pocketId: p.id,
+            pocket: p,
+            plannedAmount: String(
+              existingGoalByPocket.get(p.id) ?? prevGoalsByPocket.get(p.id) ?? 0
+            ),
+          }))
       );
 
       setLoading(false);
@@ -216,11 +209,17 @@ export default function PrepareMonth() {
       name: formData.name,
       icon: POCKET_KINDS.find((k) => k.id === formData.kind)?.icon || '💶',
       kind: formData.kind,
+      usage_type: formData.usageType,
       is_private: formData.isPrivate,
+      target_amount: formData.targetAmount,
+      target_date: formData.targetDate,
       balance: 0,
     });
     setPockets((prev) => [...prev, pocket]);
-    setGoals((prev) => [...prev, { pocketId: pocket.id, pocket, plannedAmount: '0' }]);
+    // Un compte "dépense" n'apparaît pas dans les objectifs du mois (pas de réservation).
+    if (formData.usageType !== 'depense') {
+      setGoals((prev) => [...prev, { pocketId: pocket.id, pocket, plannedAmount: '0' }]);
+    }
     setShowAddPocket(false);
   }
 
@@ -376,7 +375,7 @@ export default function PrepareMonth() {
       <section className="bg-white rounded-card p-5 shadow-sm">
         <h2 className="font-semibold mb-3">Ce que je prévois de mettre de côté</h2>
         {goals.length === 0 && !showAddPocket && (
-          <p className="text-sm text-ink/40 mb-3">Aucune poche pour l'instant.</p>
+          <p className="text-sm text-ink/40 mb-3">Aucun compte pour l'instant.</p>
         )}
         <div className="space-y-3">
           {goals.map((g) => (
@@ -399,10 +398,10 @@ export default function PrepareMonth() {
         </div>
 
         {showAddPocket ? (
-          <QuickAddPocket onCancel={() => setShowAddPocket(false)} onSubmit={handleQuickAddPocket} />
+          <QuickAddPocketForm onCancel={() => setShowAddPocket(false)} onSubmit={handleQuickAddPocket} />
         ) : (
           <button onClick={() => setShowAddPocket(true)} className="mt-3 text-teal text-sm font-medium">
-            + Ajouter une poche
+            + Ajouter un compte
           </button>
         )}
       </section>
@@ -436,55 +435,5 @@ export default function PrepareMonth() {
         </p>
       )}
     </div>
-  );
-}
-
-function QuickAddPocket({ onSubmit, onCancel }) {
-  const [name, setName] = useState('');
-  const [kind, setKind] = useState('epargne');
-  const [isPrivate, setIsPrivate] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-
-  async function handleSubmit(e) {
-    e.preventDefault();
-    if (!name) return;
-    setSubmitting(true);
-    await onSubmit({ name, kind, isPrivate });
-    setSubmitting(false);
-  }
-
-  return (
-    <form onSubmit={handleSubmit} className="mt-3 border border-teal-light rounded-2xl p-3 space-y-2">
-      <input
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        placeholder="Nom de la poche"
-        className="w-full bg-cream rounded-xl px-3 py-2 border border-teal-light text-sm"
-        autoFocus
-      />
-      <select
-        value={kind}
-        onChange={(e) => setKind(e.target.value)}
-        className="w-full bg-cream rounded-xl px-3 py-2 border border-teal-light text-sm"
-      >
-        {POCKET_KINDS.map((k) => <option key={k.id} value={k.id}>{k.icon} {k.label}</option>)}
-      </select>
-      <label className="flex items-center gap-2 text-xs text-ink/60">
-        <input type="checkbox" checked={isPrivate} onChange={(e) => setIsPrivate(e.target.checked)} />
-        Poche privée (visible de moi seul·e)
-      </label>
-      <div className="flex gap-2">
-        <button type="button" onClick={onCancel} className="flex-1 text-sm text-ink/50 py-2">
-          Annuler
-        </button>
-        <button
-          type="submit"
-          disabled={submitting}
-          className="flex-1 bg-teal text-white text-sm font-semibold rounded-xl py-2 disabled:opacity-50"
-        >
-          Ajouter
-        </button>
-      </div>
-    </form>
   );
 }

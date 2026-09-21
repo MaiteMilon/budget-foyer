@@ -1,49 +1,49 @@
 import { useEffect, useState } from 'react';
-import { getHouseholdPockets, deletePocket, addPocket, getMonthSavingsGoals } from '../lib/data.js';
+import { getHouseholdPockets, deletePocket, addPocket, getMonthSavingsGoals, getMonthExpenses } from '../lib/data.js';
 import { recordPocketTransfer } from '../lib/transfers.js';
 import { computeGoalProgress } from '../lib/budget-engine.js';
 import { useApp } from '../context/AppContext.jsx';
-
-const POCKET_KINDS = [
-  { id: 'compte_joint', label: 'Compte joint', icon: '🏦' },
-  { id: 'tirelire', label: 'Tirelire / espèces', icon: '🐷' },
-  { id: 'epargne', label: 'Compte épargne', icon: '💶' },
-  { id: 'vacances', label: 'Vacances', icon: '🏖️' },
-  { id: 'precaution', label: 'Épargne de précaution', icon: '🛟' },
-  { id: 'projet', label: 'Projet particulier', icon: '🎯' },
-  { id: 'autre', label: 'Autre', icon: '➕' },
-];
+import QuickAddPocketForm, { POCKET_KINDS } from '../components/QuickAddPocketForm.jsx';
 
 export default function Epargne() {
   const { profile, currentBudgetMonth, refresh } = useApp();
   const [pockets, setPockets] = useState([]);
   const [goalsByPocket, setGoalsByPocket] = useState(new Map());
+  const [spentByPocket, setSpentByPocket] = useState(new Map());
   const [loading, setLoading] = useState(true);
   const [showAddPocket, setShowAddPocket] = useState(false);
-  const [transferringId, setTransferringId] = useState(null); // id de la poche dont le formulaire de versement est ouvert
+  const [transferringId, setTransferringId] = useState(null);
   const [error, setError] = useState('');
 
   async function load() {
     setLoading(true);
-    const [pocketsList, goals] = await Promise.all([
+    const [pocketsList, goals, expenses] = await Promise.all([
       getHouseholdPockets(profile.household_id),
       getMonthSavingsGoals(currentBudgetMonth.id),
+      getMonthExpenses(currentBudgetMonth.id, profile.id),
     ]);
     setPockets(pocketsList);
     setGoalsByPocket(new Map(goals.map((g) => [g.pocket_id, g])));
+
+    const spentMap = new Map();
+    expenses.forEach((e) => {
+      if (!e.source_pocket_id) return;
+      spentMap.set(e.source_pocket_id, (spentMap.get(e.source_pocket_id) || 0) + Number(e.amount));
+    });
+    setSpentByPocket(spentMap);
     setLoading(false);
   }
 
   useEffect(() => { load(); }, [profile.household_id, currentBudgetMonth.id]);
 
   async function handleDelete(pocket) {
-    const ok = window.confirm(`Supprimer la poche "${pocket.name}" ? Cette action est irréversible.`);
+    const ok = window.confirm(`Supprimer le compte "${pocket.name}" ? Cette action est irréversible.`);
     if (!ok) return;
     await deletePocket(pocket.id);
     await load();
   }
 
-  async function handleAddPocket({ name, kind, isPrivate }) {
+  async function handleAddPocket({ name, kind, usageType, isPrivate, targetAmount, targetDate }) {
     setError('');
     try {
       await addPocket({
@@ -52,7 +52,10 @@ export default function Epargne() {
         name,
         icon: POCKET_KINDS.find((k) => k.id === kind)?.icon || '💶',
         kind,
+        usage_type: usageType,
         is_private: isPrivate,
+        target_amount: targetAmount,
+        target_date: targetDate,
         balance: 0,
       });
       setShowAddPocket(false);
@@ -82,91 +85,176 @@ export default function Epargne() {
 
   if (loading) return <p className="text-center text-ink/50 mt-20">Chargement…</p>;
 
-  const total = pockets.reduce((sum, p) => sum + Number(p.balance), 0);
+  const depenseAccounts = pockets.filter((p) => p.usage_type === 'depense');
+  const epargneAccounts = pockets.filter((p) => p.usage_type !== 'depense');
+  const totalEpargne = epargneAccounts.reduce((sum, p) => sum + Number(p.balance), 0);
 
   return (
     <div className="space-y-5">
       <header>
-        <h1 className="text-2xl font-bold">Notre épargne</h1>
+        <h1 className="text-2xl font-bold">Nos comptes</h1>
       </header>
 
       <section className="bg-teal text-white rounded-card p-6 shadow-sm">
         <p className="text-sm text-white/80 font-medium">Total épargne du foyer</p>
-        <p className="text-4xl font-extrabold mt-1">{total.toLocaleString('fr-FR')} €</p>
+        <p className="text-4xl font-extrabold mt-1">{totalEpargne.toLocaleString('fr-FR')} €</p>
       </section>
 
       {error && <p className="text-coral text-sm text-center">{error}</p>}
 
-      <ul className="space-y-3">
-        {pockets.map((p) => {
-          const goal = goalsByPocket.get(p.id);
-          const progress = goal
-            ? computeGoalProgress({ plannedAmount: goal.planned_amount, actualPaidIn: goal.actual_paid_in })
-            : null;
-          const canManage = !p.is_private || p.owner_id === profile.id;
+      <section>
+        <h2 className="font-semibold mb-3">Comptes de dépense</h2>
+        <ul className="space-y-3">
+          {depenseAccounts.map((p) => {
+            const spentThisMonth = spentByPocket.get(p.id) || 0;
+            const hasEnvelope = p.target_amount && Number(p.target_amount) > 0;
+            const remaining = hasEnvelope ? Number(p.target_amount) - spentThisMonth : null;
+            const canManage = !p.is_private || p.owner_id === profile.id;
 
-          return (
-            <li key={p.id} className="bg-white rounded-card p-4 shadow-sm">
-              <div className="flex justify-between items-center">
-                <span className="font-medium">
-                  {p.icon} {p.name}
-                  {p.is_private && <span className="text-ink/30 text-xs"> · privée</span>}
-                </span>
-                <span className="font-semibold">{Number(p.balance).toLocaleString('fr-FR')} €</span>
-              </div>
-
-              {progress && progress.planned > 0 && (
-                <>
-                  <div className="flex justify-between text-xs text-ink/50 mt-2 mb-1">
-                    <span>Versé ce mois-ci</span>
-                    <span>{progress.paid.toLocaleString('fr-FR')} € / {progress.planned.toLocaleString('fr-FR')} €</span>
-                  </div>
-                  <div className="h-2 rounded-full bg-teal-light overflow-hidden">
-                    <div
-                      className="h-full bg-amber rounded-full"
-                      style={{ width: `${Math.round(progress.ratio * 100)}%` }}
-                    />
-                  </div>
-                </>
-              )}
-
-              {canManage && (
-                <div className="flex justify-between items-center mt-3">
-                  <button
-                    onClick={() => setTransferringId(transferringId === p.id ? null : p.id)}
-                    className="text-teal text-xs font-semibold"
-                  >
-                    {transferringId === p.id ? 'Annuler' : '+ Verser'}
-                  </button>
-                  <button
-                    onClick={() => handleDelete(p)}
-                    className="text-coral text-xs underline"
-                    aria-label={`Supprimer ${p.name}`}
-                  >
-                    Supprimer
-                  </button>
+            return (
+              <li key={p.id} className="bg-white rounded-card p-4 shadow-sm">
+                <div className="flex justify-between items-center">
+                  <span className="font-medium">
+                    {p.icon} {p.name}
+                    {p.is_private && <span className="text-ink/30 text-xs"> · privé</span>}
+                  </span>
+                  <span className="font-semibold">{Number(p.balance).toLocaleString('fr-FR')} €</span>
                 </div>
-              )}
 
-              {transferringId === p.id && (
-                <TransferForm onSubmit={(amount) => handleTransfer(p, amount)} />
-              )}
-            </li>
-          );
-        })}
-        {pockets.length === 0 && (
-          <p className="text-center text-ink/40 text-sm py-6">Aucune poche pour l'instant.</p>
-        )}
-      </ul>
+                {hasEnvelope && (
+                  <div className="mt-2">
+                    <div className="flex justify-between text-xs text-ink/50 mb-1">
+                      <span>Enveloppe du mois</span>
+                      <span>{spentThisMonth.toLocaleString('fr-FR')} € / {Number(p.target_amount).toLocaleString('fr-FR')} €</span>
+                    </div>
+                    <div className="h-2 rounded-full bg-teal-light overflow-hidden">
+                      <div
+                        className="h-full bg-amber rounded-full"
+                        style={{ width: `${Math.min(100, Math.round((spentThisMonth / p.target_amount) * 100))}%` }}
+                      />
+                    </div>
+                    <p className="text-xs text-ink/40 mt-1">
+                      {remaining >= 0 ? `Il reste ${remaining.toLocaleString('fr-FR')} €` : `Dépassement de ${Math.abs(remaining).toLocaleString('fr-FR')} €`}
+                    </p>
+                  </div>
+                )}
+
+                {canManage && (
+                  <div className="flex justify-between items-center mt-3">
+                    <button
+                      onClick={() => setTransferringId(transferringId === p.id ? null : p.id)}
+                      className="text-teal text-xs font-semibold"
+                    >
+                      {transferringId === p.id ? 'Annuler' : '+ Approvisionner'}
+                    </button>
+                    <button
+                      onClick={() => handleDelete(p)}
+                      className="text-coral text-xs underline"
+                    >
+                      Supprimer
+                    </button>
+                  </div>
+                )}
+
+                {transferringId === p.id && (
+                  <TransferForm onSubmit={(amount) => handleTransfer(p, amount)} />
+                )}
+              </li>
+            );
+          })}
+          {depenseAccounts.length === 0 && (
+            <p className="text-center text-ink/40 text-sm py-4">Aucun compte de dépense pour l'instant.</p>
+          )}
+        </ul>
+      </section>
+
+      <section>
+        <h2 className="font-semibold mb-3">Notre épargne</h2>
+        <ul className="space-y-3">
+          {epargneAccounts.map((p) => {
+            const goal = goalsByPocket.get(p.id);
+            const monthlyProgress = goal
+              ? computeGoalProgress({ plannedAmount: goal.planned_amount, actualPaidIn: goal.actual_paid_in })
+              : null;
+            const hasTarget = p.target_amount && Number(p.target_amount) > 0;
+            const targetRatio = hasTarget ? Math.min(1, Number(p.balance) / Number(p.target_amount)) : 0;
+            const remainingToTarget = hasTarget ? Math.max(0, Number(p.target_amount) - Number(p.balance)) : 0;
+            const canManage = !p.is_private || p.owner_id === profile.id;
+
+            return (
+              <li key={p.id} className="bg-white rounded-card p-4 shadow-sm">
+                <div className="flex justify-between items-center">
+                  <span className="font-medium">
+                    {p.icon} {p.name}
+                    {p.is_private && <span className="text-ink/30 text-xs"> · privé</span>}
+                  </span>
+                  <span className="font-semibold">{Number(p.balance).toLocaleString('fr-FR')} €</span>
+                </div>
+
+                {hasTarget && (
+                  <div className="mt-2">
+                    <div className="flex justify-between text-xs text-ink/50 mb-1">
+                      <span>
+                        Objectif : {Number(p.target_amount).toLocaleString('fr-FR')} €
+                        {p.target_date && ` · ${new Date(p.target_date).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}`}
+                      </span>
+                      <span>reste {remainingToTarget.toLocaleString('fr-FR')} €</span>
+                    </div>
+                    <div className="h-2 rounded-full bg-teal-light overflow-hidden">
+                      <div className="h-full bg-teal rounded-full" style={{ width: `${Math.round(targetRatio * 100)}%` }} />
+                    </div>
+                  </div>
+                )}
+
+                {monthlyProgress && monthlyProgress.planned > 0 && (
+                  <div className="mt-2">
+                    <div className="flex justify-between text-xs text-ink/50 mb-1">
+                      <span>Versé ce mois-ci</span>
+                      <span>{monthlyProgress.paid.toLocaleString('fr-FR')} € / {monthlyProgress.planned.toLocaleString('fr-FR')} €</span>
+                    </div>
+                    <div className="h-2 rounded-full bg-teal-light overflow-hidden">
+                      <div className="h-full bg-amber rounded-full" style={{ width: `${Math.round(monthlyProgress.ratio * 100)}%` }} />
+                    </div>
+                  </div>
+                )}
+
+                {canManage && (
+                  <div className="flex justify-between items-center mt-3">
+                    <button
+                      onClick={() => setTransferringId(transferringId === p.id ? null : p.id)}
+                      className="text-teal text-xs font-semibold"
+                    >
+                      {transferringId === p.id ? 'Annuler' : '+ Verser'}
+                    </button>
+                    <button
+                      onClick={() => handleDelete(p)}
+                      className="text-coral text-xs underline"
+                    >
+                      Supprimer
+                    </button>
+                  </div>
+                )}
+
+                {transferringId === p.id && (
+                  <TransferForm onSubmit={(amount) => handleTransfer(p, amount)} />
+                )}
+              </li>
+            );
+          })}
+          {epargneAccounts.length === 0 && (
+            <p className="text-center text-ink/40 text-sm py-4">Aucun compte d'épargne pour l'instant.</p>
+          )}
+        </ul>
+      </section>
 
       {showAddPocket ? (
-        <QuickAddPocket onCancel={() => setShowAddPocket(false)} onSubmit={handleAddPocket} />
+        <QuickAddPocketForm onCancel={() => setShowAddPocket(false)} onSubmit={handleAddPocket} />
       ) : (
         <button
           onClick={() => setShowAddPocket(true)}
           className="w-full bg-white border border-teal-light text-teal font-semibold rounded-card py-4"
         >
-          + Ajouter une poche
+          + Ajouter un compte
         </button>
       )}
     </div>
@@ -207,58 +295,6 @@ function TransferForm({ onSubmit }) {
       >
         OK
       </button>
-    </form>
-  );
-}
-
-function QuickAddPocket({ onSubmit, onCancel }) {
-  const [name, setName] = useState('');
-  const [kind, setKind] = useState('epargne');
-  const [isPrivate, setIsPrivate] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-
-  async function handleSubmit(e) {
-    e.preventDefault();
-    if (!name) return;
-    setSubmitting(true);
-    await onSubmit({ name, kind, isPrivate });
-    setSubmitting(false);
-  }
-
-  return (
-    <form onSubmit={handleSubmit} className="bg-white rounded-card p-5 shadow-sm space-y-3">
-      <h2 className="font-semibold">Nouvelle poche</h2>
-      <input
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        placeholder="Nom de la poche"
-        required
-        autoFocus
-        className="w-full bg-cream rounded-xl px-3 py-2 border border-teal-light text-sm"
-      />
-      <select
-        value={kind}
-        onChange={(e) => setKind(e.target.value)}
-        className="w-full bg-cream rounded-xl px-3 py-2 border border-teal-light text-sm"
-      >
-        {POCKET_KINDS.map((k) => <option key={k.id} value={k.id}>{k.icon} {k.label}</option>)}
-      </select>
-      <label className="flex items-center gap-2 text-xs text-ink/60">
-        <input type="checkbox" checked={isPrivate} onChange={(e) => setIsPrivate(e.target.checked)} />
-        Poche privée (visible de moi seul·e)
-      </label>
-      <div className="flex gap-2">
-        <button type="button" onClick={onCancel} className="flex-1 text-sm text-ink/50 py-2">
-          Annuler
-        </button>
-        <button
-          type="submit"
-          disabled={submitting}
-          className="flex-1 bg-teal text-white text-sm font-semibold rounded-xl py-2 disabled:opacity-50"
-        >
-          Ajouter
-        </button>
-      </div>
     </form>
   );
 }

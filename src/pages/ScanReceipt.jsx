@@ -9,7 +9,7 @@ const CATEGORIES = [
   'loisirs', 'sante', 'beaute', 'achats_perso', 'vacances', 'autres',
 ];
 
-export default function ScanReceipt({ onDone }) {
+export default function ScanReceipt({ onDone, accounts = [] }) {
   const { profile, currentBudgetMonth } = useApp();
   const fileInputRef = useRef(null);
   const [photo, setPhoto] = useState(null);
@@ -29,6 +29,7 @@ export default function ScanReceipt({ onDone }) {
         date: result.date ?? new Date().toISOString().slice(0, 10),
         merchant: result.merchant ?? '',
         category: 'courses',
+        accountId: 'perso',
         keepPhoto: true,
       });
       setStage('confirming');
@@ -39,6 +40,7 @@ export default function ScanReceipt({ onDone }) {
         date: new Date().toISOString().slice(0, 10),
         merchant: '',
         category: 'courses',
+        accountId: 'perso',
         keepPhoto: true,
       });
       setErrorMessage("La lecture automatique a échoué — vérifiez et complétez les champs ci-dessous.");
@@ -59,7 +61,8 @@ export default function ScanReceipt({ onDone }) {
         household_id: profile.household_id,
         paid_by: profile.id,
         budget_month_id: currentBudgetMonth.id,
-        source_type: 'perso',
+        source_type: detected.accountId === 'perso' ? 'perso' : 'pocket',
+        source_pocket_id: detected.accountId === 'perso' ? null : detected.accountId,
         amount: Number(detected.amount),
         spent_at: detected.date,
         category: detected.category,
@@ -143,9 +146,21 @@ export default function ScanReceipt({ onDone }) {
         <select
           value={detected.category}
           onChange={(e) => setDetected({ ...detected, category: e.target.value })}
-          className="w-full mt-1 bg-cream rounded-2xl px-4 py-3 border border-teal-light outline-none"
+          className="w-full mt-1 mb-3 bg-cream rounded-2xl px-4 py-3 border border-teal-light outline-none"
         >
           {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+
+        <label className="text-sm font-medium text-ink/70">Payé depuis</label>
+        <select
+          value={detected.accountId}
+          onChange={(e) => setDetected({ ...detected, accountId: e.target.value })}
+          className="w-full mt-1 bg-cream rounded-2xl px-4 py-3 border border-teal-light outline-none"
+        >
+          <option value="perso">Mon compte perso</option>
+          {accounts.map((a) => (
+            <option key={a.id} value={a.id}>{a.icon} {a.name}</option>
+          ))}
         </select>
 
         <label className="flex items-center gap-2 mt-3 text-sm text-ink/70">

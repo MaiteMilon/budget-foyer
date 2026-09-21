@@ -33,6 +33,7 @@ export async function getRecurringChargeTemplates(householdId, userId) {
     .select('*')
     .eq('household_id', householdId)
     .eq('is_recurring', true)
+    .eq('is_active', true)
     .or(`is_shared.eq.true,owner_id.eq.${userId}`);
   if (error) throw error;
   return data;

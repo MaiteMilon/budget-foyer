@@ -39,7 +39,7 @@ async function loadMemberBudget(member, monthISO) {
     incomes,
     savingsGoals: goals.map((g) => ({ plannedAmount: g.planned_amount })),
     fixedCharges: charges,
-    expenses: expenses.map((e) => ({ amount: e.amount, sourceType: e.source_type })),
+    expenses: expenses.map((e) => ({ amount: e.amount, sourceType: e.source_type, pocketUsageType: e.source_pocket?.usage_type })),
   });
 
   return { member, month, budget };
@@ -146,7 +146,7 @@ export default function Foyer() {
       </section>
 
       <section className="bg-white rounded-card p-5 shadow-sm">
-        <h2 className="font-semibold mb-3">Nos poches d'épargne</h2>
+        <h2 className="font-semibold mb-3">Nos comptes</h2>
         <ul className="space-y-2">
           {pockets.map((p) => (
             <li key={p.id} className="flex justify-between text-sm">
@@ -154,7 +154,7 @@ export default function Foyer() {
               <span className="font-medium">{Number(p.balance).toLocaleString('fr-FR')} €</span>
             </li>
           ))}
-          {pockets.length === 0 && <p className="text-sm text-ink/40">Aucune poche pour l'instant.</p>}
+          {pockets.length === 0 && <p className="text-sm text-ink/40">Aucun compte pour l'instant.</p>}
         </ul>
       </section>
 

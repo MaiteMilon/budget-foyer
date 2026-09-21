@@ -10,6 +10,7 @@ import {
   getMonthFixedCharges,
   getMonthExpenses,
   getBudgetMonthForUser,
+  getHouseholdPockets,
 } from '../lib/data.js';
 
 export default function Dashboard() {
@@ -17,6 +18,9 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [budget, setBudget] = useState(null);
   const [goals, setGoals] = useState([]);
+  const [pocketsWithTarget, setPocketsWithTarget] = useState([]);
+  const [depenseAccounts, setDepenseAccounts] = useState([]);
+  const [spentByPocket, setSpentByPocket] = useState(new Map());
   const [nextMonthToPrep, setNextMonthToPrep] = useState(null); // '2026-10-01' si à préparer, sinon null
 
   useEffect(() => {
@@ -24,11 +28,12 @@ export default function Dashboard() {
     async function load() {
       if (!currentBudgetMonth) return;
       setLoading(true);
-      const [incomes, monthGoals, charges, expenses] = await Promise.all([
+      const [incomes, monthGoals, charges, expenses, pockets] = await Promise.all([
         getMonthIncomes(currentBudgetMonth.id),
         getMonthSavingsGoals(currentBudgetMonth.id),
         getMonthFixedCharges(currentBudgetMonth.id),
         getMonthExpenses(currentBudgetMonth.id, profile.id),
+        getHouseholdPockets(profile.household_id),
       ]);
       if (cancelled) return;
 
@@ -38,7 +43,7 @@ export default function Dashboard() {
           incomes,
           savingsGoals: monthGoals.map((g) => ({ plannedAmount: g.planned_amount })),
           fixedCharges: charges,
-          expenses: expenses.map((e) => ({ amount: e.amount, sourceType: e.source_type })),
+          expenses: expenses.map((e) => ({ amount: e.amount, sourceType: e.source_type, pocketUsageType: e.source_pocket?.usage_type })),
         })
       );
       setGoals(
@@ -48,6 +53,16 @@ export default function Dashboard() {
           actualPaidIn: g.actual_paid_in,
         }))
       );
+      setPocketsWithTarget(pockets.filter((p) => p.target_amount && Number(p.target_amount) > 0 && p.usage_type !== 'depense'));
+      setDepenseAccounts(pockets.filter((p) => p.usage_type === 'depense'));
+
+      const spentMap = new Map();
+      expenses.forEach((e) => {
+        if (!e.source_pocket_id) return;
+        spentMap.set(e.source_pocket_id, (spentMap.get(e.source_pocket_id) || 0) + Number(e.amount));
+      });
+      setSpentByPocket(spentMap);
+
       setLoading(false);
     }
     load();
@@ -139,10 +154,38 @@ export default function Dashboard() {
         </dl>
       </section>
 
+      {depenseAccounts.length > 0 && (
+        <section className="bg-white rounded-card p-5 shadow-sm">
+          <div className="flex justify-between items-center mb-3">
+            <h2 className="font-semibold">Nos comptes</h2>
+            <Link to="/epargne" className="text-xs text-teal underline">Gérer</Link>
+          </div>
+          <ul className="space-y-3">
+            {depenseAccounts.map((a) => {
+              const spent = spentByPocket.get(a.id) || 0;
+              const hasEnvelope = a.target_amount && Number(a.target_amount) > 0;
+              return (
+                <li key={a.id}>
+                  <div className="flex justify-between text-sm">
+                    <span className="font-medium">{a.icon} {a.name}</span>
+                    <span className="text-ink/60">{Number(a.balance).toLocaleString('fr-FR')} €</span>
+                  </div>
+                  {hasEnvelope && (
+                    <p className="text-xs text-ink/40 mt-0.5">
+                      {spent.toLocaleString('fr-FR')} € dépensés / {Number(a.target_amount).toLocaleString('fr-FR')} € ce mois-ci
+                    </p>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
+
       <section className="bg-white rounded-card p-5 shadow-sm">
         <h2 className="font-semibold mb-3">Objectifs du mois</h2>
         {goals.length === 0 && (
-          <p className="text-sm text-ink/40">Aucun objectif défini pour ce mois — ajoutez vos poches d'épargne.</p>
+          <p className="text-sm text-ink/40">Aucun objectif défini pour ce mois — ajoutez vos comptes d'épargne.</p>
         )}
         <ul className="space-y-4">
           {goals.map((g, i) => {
@@ -170,6 +213,44 @@ export default function Dashboard() {
           })}
         </ul>
       </section>
+
+      {pocketsWithTarget.length > 0 && (
+        <section className="bg-white rounded-card p-5 shadow-sm">
+          <h2 className="font-semibold mb-3">Objectifs d'épargne</h2>
+          <ul className="space-y-4">
+            {pocketsWithTarget.map((p) => {
+              const ratio = Math.min(1, Number(p.balance) / Number(p.target_amount));
+              const remaining = Math.max(0, Number(p.target_amount) - Number(p.balance));
+              return (
+                <li key={p.id}>
+                  <div className="flex justify-between text-sm mb-1">
+                    <span className="font-medium">
+                      {p.icon} {p.name}
+                      {p.target_date && (
+                        <span className="text-ink/40 font-normal">
+                          {' '}· {new Date(p.target_date).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}
+                        </span>
+                      )}
+                    </span>
+                    <span className="text-ink/60">
+                      {Number(p.balance).toLocaleString('fr-FR')} € / {Number(p.target_amount).toLocaleString('fr-FR')} €
+                    </span>
+                  </div>
+                  <div className="h-2 rounded-full bg-teal-light overflow-hidden">
+                    <div
+                      className="h-full bg-teal rounded-full transition-all"
+                      style={{ width: `${Math.round(ratio * 100)}%` }}
+                    />
+                  </div>
+                  {remaining > 0 && (
+                    <p className="text-xs text-ink/40 mt-1">Il reste {remaining.toLocaleString('fr-FR')} € à mettre de côté</p>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
 
       <section className="bg-white rounded-card p-5 shadow-sm">
         <div className="flex justify-between items-center mb-3">

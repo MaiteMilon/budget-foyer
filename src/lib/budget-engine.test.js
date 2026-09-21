@@ -4,6 +4,7 @@ import {
   computeGoalProgress,
   applyPocketTransfer,
   simulateWishlistPurchase,
+  computeInstallmentSchedule,
 } from './budget-engine.js';
 
 describe('computeMonthlyBudget', () => {
@@ -45,11 +46,25 @@ describe('computeMonthlyBudget', () => {
       expenses: [
         { amount: 40, sourceType: 'perso' },
         { amount: 999, sourceType: 'compte_joint' },
-        { amount: 999, sourceType: 'pocket' },
+        { amount: 999, sourceType: 'pocket', pocketUsageType: 'epargne' },
       ],
     });
     // Seuls les 40€ perso comptent, pas les 999€ x2
     expect(result.remaining).toBe(960);
+  });
+
+  it('compte les dépenses payées depuis un compte "dépense" (ex. BRED), exactement comme perso', () => {
+    const result = computeMonthlyBudget({
+      safetyMargin: 0,
+      incomes: [{ amount: 1000 }],
+      savingsGoals: [],
+      fixedCharges: [],
+      expenses: [
+        { amount: 40, sourceType: 'perso' },
+        { amount: 60, sourceType: 'pocket', pocketUsageType: 'depense' },
+      ],
+    });
+    expect(result.remaining).toBe(900);
   });
 
   it('utilise l’objectif prévu, pas le montant réellement versé, pour réserver l’argent (§3)', () => {
@@ -98,5 +113,45 @@ describe('simulateWishlistPurchase', () => {
     const { before, after } = simulateWishlistPurchase(565, 129);
     expect(before).toBe(565);
     expect(after).toBe(436);
+  });
+});
+
+describe('computeInstallmentSchedule', () => {
+  it('répartit un montant total qui se divise exactement', () => {
+    const schedule = computeInstallmentSchedule({
+      totalAmount: 600,
+      count: 6,
+      startMonthISO: '2026-09-01',
+    });
+    expect(schedule).toHaveLength(6);
+    expect(schedule.every((s) => s.amount === 100)).toBe(true);
+    expect(schedule.map((s) => s.month)).toEqual([
+      '2026-09-01', '2026-10-01', '2026-11-01', '2026-12-01', '2027-01-01', '2027-02-01',
+    ]);
+  });
+
+  it('absorbe l’arrondi sur la dernière mensualité, sans perdre un centime', () => {
+    const schedule = computeInstallmentSchedule({
+      totalAmount: 100,
+      count: 3,
+      startMonthISO: '2026-09-01',
+    });
+    // 100 / 3 = 33.33... -> 33.33, 33.33, puis le reste (33.34)
+    expect(schedule[0].amount).toBe(33.33);
+    expect(schedule[1].amount).toBe(33.33);
+    expect(schedule[2].amount).toBe(33.34);
+    const sum = schedule.reduce((s, x) => s + x.amount, 0);
+    expect(Math.round(sum * 100) / 100).toBe(100);
+  });
+
+  it('déduit le total à partir d’un montant mensuel donné', () => {
+    const schedule = computeInstallmentSchedule({
+      monthlyAmount: 45,
+      count: 4,
+      startMonthISO: '2026-12-01',
+    });
+    expect(schedule.reduce((s, x) => s + x.amount, 0)).toBe(180);
+    // Changement d'année pris en compte correctement
+    expect(schedule[1].month).toBe('2027-01-01');
   });
 });

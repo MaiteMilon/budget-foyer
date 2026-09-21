@@ -93,7 +93,7 @@ export async function getMonthFixedCharges(budgetMonthId) {
 export async function getMonthExpenses(budgetMonthId, paidBy) {
   const { data, error } = await supabase
     .from('expenses')
-    .select('*')
+    .select('*, source_pocket:savings_pockets(id, name, icon, usage_type)')
     .eq('budget_month_id', budgetMonthId)
     .eq('paid_by', paidBy)
     .order('spent_at', { ascending: false });

@@ -221,14 +221,87 @@ aussi ce point.
   toucher au budget disponible du mois (déjà réservé via l'objectif
   prévu — voir §4).
 
-## 11. Prochaines étapes (par ordre de priorité proposé)
+## 11. Comment fonctionne l'achat en plusieurs fois
+
+- Depuis **Ajouter une dépense → 🔁 Plusieurs fois** : montant total OU
+  mensuel (l'autre est calculé automatiquement), nombre de mensualités,
+  date de la première échéance (modifiable pour un premier prélèvement
+  différé), catégorie, personnel ou commun (compte joint).
+- Chaque mensualité est créée d'avance comme une vraie dépense, datée dans
+  le bon mois futur — le budget de ce mois-là la prendra en compte
+  automatiquement dès qu'il sera préparé, sans que vous ayez à y repenser.
+- Une mensualité dont le mois est **déjà passé ou en cours** est considérée
+  "verrouillée" et n'est plus jamais modifiée automatiquement — seules les
+  mensualités **futures** peuvent être révisées, soldées en une fois
+  (`settleRemainingNow`), ou annulées (`cancelRemainingInstallments`),
+  exactement comme demandé.
+- Le dernier versement absorbe l'écart d'arrondi (ex. 100 € / 3 mois =
+  33,33 + 33,33 + 33,34), pour ne jamais perdre un centime.
+
+## 12. Objectifs d'épargne chiffrés (comptes)
+
+- À la création d'une poche (Épargne ou Préparer mon mois), vous pouvez
+  désormais renseigner un **objectif chiffré** et une **date cible**
+  optionnels (ex. "Croisière", 2000 €, février). Le champ existait déjà
+  en base (`target_amount`, `target_date`) mais aucun formulaire ne le
+  proposait — corrigé.
+- La progression s'affiche à deux endroits : sur **Épargne** (par poche)
+  et sur l'**Accueil**, dans une nouvelle carte "Objectifs d'épargne"
+  distincte de "Objectifs du mois" — celle-ci suit le solde réel de la
+  poche par rapport à l'objectif total, pas le versement prévu du mois en
+  cours.
+- Verser de l'argent dans la poche (bouton "+ Verser") fait avancer cette
+  progression automatiquement, sans jamais toucher au budget disponible
+  (même règle qu'ailleurs : l'argent est déjà réservé dès qu'il est
+  prévu, pas quand il est physiquement versé).
+
+## 13. Comptes : dépense vs épargne (refonte du concept "poche")
+
+Suite à un vrai besoin identifié en testant ("je veux voir combien il me
+reste sur mon compte BRED, sur mon Livret A...") : ce qui s'appelait
+"poche" est renommé **compte** partout dans l'interface, et chaque compte
+a désormais un **usage** choisi à la création :
+
+- **Dépense** (ex. carte BRED, La Poste, espèces) : aucune réservation
+  préalable — le dépenser réduit **directement** le reste à dépenser du
+  mois, exactement comme "Mon compte perso". Une enveloppe mensuelle
+  optionnelle sert uniquement de repère visuel propre à ce compte, sans
+  rien réserver en plus.
+- **Épargne** (dont le compte joint, désormais unifié dans ce même
+  système plutôt qu'un cas à part) : de l'argent mis de côté via un
+  objectif/versement prévu chaque mois — le dépenser ne re-diminue
+  **jamais** le reste à dépenser, déjà réservé en amont. C'est exactement
+  le comportement historique du compte joint, conservé à l'identique.
+
+Ce qui en découle concrètement :
+- **`AddExpense.jsx` et `ScanReceipt.jsx` proposent enfin un vrai
+  sélecteur de compte** — ce menu n'existait pas avant (trou identifié en
+  testant : choisir "poche" ne demandait jamais laquelle), donc dépenser
+  depuis un compte particulier ne faisait déjà baisser aucun solde.
+  Corrigé : chaque dépense peut être imputée à n'importe quel compte, quel
+  que soit son usage — y compris piocher dans un compte épargne, qui
+  réduit alors son solde sans toucher au reste à dépenser (cohérent avec
+  la règle ci-dessus).
+- **`computeMonthlyBudget()`** distingue maintenant les dépenses par le
+  type du compte source (`pocketUsageType`), pas seulement par
+  `sourceType` — voir les nouveaux tests dans `budget-engine.test.js`.
+- **`PrepareMonth.jsx`** n'affiche les comptes de type "épargne" dans "Ce
+  que je prévois de mettre de côté" — un compte "dépense" n'a pas de
+  réservation mensuelle à définir.
+- **Épargne.jsx** est divisé en deux sections : "Comptes de dépense" et
+  "Notre épargne". **Dashboard.jsx** affiche désormais une carte "Nos
+  comptes" avec le solde de chaque compte de dépense.
+- Les noms de compte restent **toujours saisis librement** par chaque
+  utilisateur — rien n'est suggéré ni codé en dur.
+
+## 14. Prochaines étapes (par ordre de priorité proposé)
 
 1. **Notifications** (§16) : Web Push via le service worker déjà généré
    par `vite-plugin-pwa`, déclenchées par des fonctions Supabase Edge sur
    les seuils (50 % du budget, délai de réflexion terminé, etc.).
 2. **Export CSV/PDF** (§20).
 
-## 12. Pour tester à deux dès maintenant
+## 15. Pour tester à deux dès maintenant
 
 1. Créer un projet Supabase, exécuter `supabase/schema.sql` dans son
    éditeur SQL, renseigner `.env` (voir §5).

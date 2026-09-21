@@ -31,7 +31,7 @@
  * @property {{amount:number}[]} incomes
  * @property {{plannedAmount:number}[]} savingsGoals   // uniquement les poches dont owner = cet utilisateur (perso + communes qu'il alimente)
  * @property {{amount:number}[]} fixedCharges           // occurrences du mois, perso + part commune attribuée à cet utilisateur
- * @property {{amount:number, sourceType:'perso'|'compte_joint'|'pocket'}[]} expenses // dépenses payées PAR cet utilisateur
+ * @property {{amount:number, sourceType:'perso'|'pocket'|'compte_joint', pocketUsageType?:'depense'|'epargne'}[]} expenses // dépenses payées PAR cet utilisateur
  */
 
 /** Somme sûre (ignore NaN/undefined) */
@@ -58,10 +58,18 @@ export function computeMonthlyBudget(input) {
   const initialBudget =
     totalIncome - totalPlannedSavings - totalFixedCharges - safetyMargin;
 
-  // Seules les dépenses payées depuis un compte PERSO diminuent ce budget.
-  // Les dépenses payées depuis le compte joint ou une poche d'épargne
-  // diminuent le solde de cette poche, pas ce budget (§9).
-  const personalExpenses = input.expenses.filter((e) => e.sourceType === 'perso');
+  // Compte pour le budget "reste à dépenser" : le compte perso, ET tout
+  // compte de type "dépense" (pas de réservation préalable — dépenser
+  // dedans, c'est dépenser tout court). Un compte de type "épargne" (dont
+  // le compte joint) N'est jamais recompté ici : son montant est déjà
+  // réservé en amont via l'objectif du mois (planned_amount) — le
+  // dépenser ensuite ne fait que réduire son propre solde, pas re-toucher
+  // ce budget (règle anti double-comptage, §9/§25). 'compte_joint' est
+  // conservé pour compatibilité avec d'anciennes dépenses, traité comme
+  // "épargne" au même titre.
+  const personalExpenses = input.expenses.filter(
+    (e) => e.sourceType === 'perso' || (e.sourceType === 'pocket' && e.pocketUsageType === 'depense')
+  );
   const totalSpent = sum(personalExpenses, (e) => e.amount);
 
   const remaining = initialBudget - totalSpent;
@@ -159,4 +167,60 @@ export function computeReflectUntil(delay, from = new Date()) {
   const hours = hoursByDelay[delay] ?? 0;
   if (hours === 0) return null;
   return new Date(from.getTime() + hours * 3600 * 1000);
+}
+
+/**
+ * Répartit un achat en plusieurs fois sur `count` mensualités, à partir de
+ * `startDateISO` (date exacte de la première échéance, ex. "2026-09-18" —
+ * accepte aussi juste "2026-09-01" pour démarrer au 1er du mois). On peut
+ * fournir soit le montant TOTAL, soit le montant MENSUEL — l'autre est
+ * déduit. Le dernier versement absorbe l'écart d'arrondi pour que la somme
+ * des mensualités retombe exactement sur le montant total (jamais 0,01 €
+ * qui manque à l'appel).
+ *
+ * @param {{totalAmount?: number, monthlyAmount?: number, count: number, startDateISO?: string, startMonthISO?: string}} input
+ * @returns {{index: number, amount: number, dueDate: string, month: string}[]}
+ */
+export function computeInstallmentSchedule({ totalAmount, monthlyAmount, count, startDateISO, startMonthISO }) {
+  const baseDateISO = startDateISO || startMonthISO;
+  const n = Math.max(1, Math.round(count));
+  let total, perMonth;
+
+  if (totalAmount != null) {
+    total = round2(totalAmount);
+    perMonth = round2(total / n);
+  } else {
+    perMonth = round2(monthlyAmount);
+    total = round2(perMonth * n);
+  }
+
+  const schedule = [];
+  let runningTotal = 0;
+  for (let i = 0; i < n; i++) {
+    const isLast = i === n - 1;
+    const amount = isLast ? round2(total - runningTotal) : perMonth;
+    runningTotal = round2(runningTotal + amount);
+    const dueDate = addMonthsClamped(baseDateISO, i);
+    schedule.push({ index: i + 1, amount, dueDate, month: firstOfMonth(dueDate) });
+  }
+  return schedule;
+}
+
+function round2(value) {
+  return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+}
+
+/** Ajoute `count` mois à une date ISO, en calant sur le dernier jour du mois cible si besoin (ex. 31 janvier + 1 mois -> 28/29 février, jamais mars). */
+function addMonthsClamped(dateISO, count) {
+  const d = new Date(dateISO + 'T00:00:00');
+  const day = d.getDate();
+  d.setDate(1); // évite le débordement automatique de setMonth sur les jours 29-31
+  d.setMonth(d.getMonth() + count);
+  const lastDayOfTargetMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  d.setDate(Math.min(day, lastDayOfTargetMonth));
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function firstOfMonth(dateISO) {
+  return dateISO.slice(0, 7) + '-01';
 }

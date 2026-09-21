@@ -76,13 +76,20 @@ create table incomes (
 create table savings_pockets (
   id uuid primary key default uuid_generate_v4(),
   household_id uuid not null references households (id) on delete cascade,
-  owner_id uuid references profiles (id) on delete cascade, -- NULL = poche commune
-  name text not null,
+  owner_id uuid references profiles (id) on delete cascade, -- NULL = compte commun
+  name text not null, -- toujours saisi librement par l'utilisateur, jamais codé en dur
   icon text,
   kind text not null check (kind in
     ('compte_joint','tirelire','epargne','vacances','precaution','projet','autre')),
+  -- 'depense' : un compte/moyen de paiement du quotidien, sans réservation
+  --   préalable — le dépenser réduit directement le budget disponible du mois,
+  --   comme "Mon compte perso" (§ règle anti double-comptage).
+  -- 'epargne' : de l'argent mis de côté via un objectif/versement prévu
+  --   chaque mois — le dépenser ne re-diminue JAMAIS le budget disponible,
+  --   déjà réservé en amont (comportement historique du compte joint).
+  usage_type text not null default 'epargne' check (usage_type in ('depense','epargne')),
   is_private boolean not null default false, -- si true, visible du seul owner (RLS)
-  target_amount numeric(10,2),
+  target_amount numeric(10,2), -- objectif d'épargne total (epargne) OU enveloppe mensuelle (depense)
   target_date date,
   balance numeric(10,2) not null default 0,  -- solde réellement constaté
   created_at timestamptz not null default now()
@@ -146,6 +153,27 @@ create table fixed_charge_entries (
 -- On le modélise en pointant soit vers un user (compte perso), soit vers
 -- une savings_pocket (compte joint / tirelire / épargne).
 
+-- Achat en plusieurs fois : le "plan" qui regroupe les mensualités générées
+-- automatiquement dans `expenses`. Une mensualité déjà passée (mois <=
+-- mois en cours) ne doit JAMAIS être modifiée rétroactivement (même
+-- principe que partout ailleurs dans l'app) ; seules les mensualités
+-- futures peuvent être révisées, soldées en une fois, ou annulées.
+create table installment_plans (
+  id uuid primary key default uuid_generate_v4(),
+  household_id uuid not null references households (id) on delete cascade,
+  created_by uuid not null references profiles (id) on delete cascade,
+  label text not null,
+  category text not null default 'autres',
+  merchant text,
+  source_type text not null check (source_type in ('perso','compte_joint','pocket')),
+  source_pocket_id uuid references savings_pockets (id),
+  is_shared boolean not null default false, -- achat commun (compte joint) vs personnel
+  total_amount numeric(10,2) not null check (total_amount > 0),
+  installment_count smallint not null check (installment_count > 0),
+  status text not null default 'active' check (status in ('active','settled','cancelled','completed')),
+  created_at timestamptz not null default now()
+);
+
 create table expenses (
   id uuid primary key default uuid_generate_v4(),
   household_id uuid not null references households (id) on delete cascade,
@@ -162,6 +190,12 @@ create table expenses (
   comment text,
   receipt_photo_url text,
   ocr_raw jsonb,             -- résultat brut OCR avant confirmation utilisateur
+
+  -- Achat en plusieurs fois (échéancier) : si renseigné, cette dépense est
+  -- une mensualité générée automatiquement par installment_plans ci-dessus.
+  installment_plan_id uuid references installment_plans (id) on delete set null,
+  installment_index smallint, -- 1, 2, 3... position dans l'échéancier
+
   created_at timestamptz not null default now()
 );
 
@@ -241,6 +275,7 @@ alter table expense_categories enable row level security;
 alter table pocket_transfers enable row level security;
 alter table wishlist_items enable row level security;
 alter table household_activity_log enable row level security;
+alter table installment_plans enable row level security;
 
 -- Fonction utilitaire : le foyer de l'utilisateur connecté
 create or replace function my_household_id()
@@ -367,6 +402,19 @@ create policy "fixed_charge_entries_household" on fixed_charge_entries
 
 create policy "expenses_household" on expenses
   for all using (household_id = my_household_id());
+
+-- installment_plans : visible par tout le foyer (utile pour voir un achat
+-- commun en cours), mais modifiable/annulable seulement par celui qui l'a
+-- créé — un échéancier personnel ne doit pas pouvoir être modifié par le
+-- conjoint, même si son existence peut être visible côté commun.
+create policy "installment_plans_select" on installment_plans
+  for select using (household_id = my_household_id());
+create policy "installment_plans_insert" on installment_plans
+  for insert with check (household_id = my_household_id() and created_by = auth.uid());
+create policy "installment_plans_update" on installment_plans
+  for update using (household_id = my_household_id() and created_by = auth.uid());
+create policy "installment_plans_delete" on installment_plans
+  for delete using (household_id = my_household_id() and created_by = auth.uid());
 
 create policy "expense_categories_household" on expense_categories
   for all using (household_id = my_household_id());
@@ -604,6 +652,21 @@ alter table fixed_charges add column if not exists due_day smallint;
 alter table fixed_charges add column if not exists one_off_date date;
 alter table fixed_charges add column if not exists is_active boolean not null default true;
 
+-- Comptes (ex-"poches") : dépense vs épargne. Les comptes existants
+-- (dont le compte joint) reprennent 'epargne' par défaut, ce qui
+-- correspond exactement à leur comportement historique (réservé en
+-- amont, jamais re-décompté du budget disponible).
+alter table savings_pockets add column if not exists usage_type text not null default 'epargne';
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'savings_pockets_usage_type_check'
+  ) then
+    alter table savings_pockets add constraint savings_pockets_usage_type_check
+      check (usage_type in ('depense','epargne'));
+  end if;
+end $$;
+
 do $$
 begin
   if not exists (
@@ -729,6 +792,49 @@ end;
 $$;
 
 grant execute on function accept_household_invite(text) to authenticated;
+
+-- =====================================================================
+-- MIGRATION — Achat en plusieurs fois (échéancier). Idempotent, à
+-- exécuter même si vous avez déjà lancé une version antérieure de ce
+-- fichier (sans effet si les tables/colonnes existent déjà).
+-- =====================================================================
+
+create table if not exists installment_plans (
+  id uuid primary key default uuid_generate_v4(),
+  household_id uuid not null references households (id) on delete cascade,
+  created_by uuid not null references profiles (id) on delete cascade,
+  label text not null,
+  category text not null default 'autres',
+  merchant text,
+  source_type text not null check (source_type in ('perso','compte_joint','pocket')),
+  source_pocket_id uuid references savings_pockets (id),
+  is_shared boolean not null default false,
+  total_amount numeric(10,2) not null check (total_amount > 0),
+  installment_count smallint not null check (installment_count > 0),
+  status text not null default 'active' check (status in ('active','settled','cancelled','completed')),
+  created_at timestamptz not null default now()
+);
+
+alter table installment_plans enable row level security;
+
+alter table expenses add column if not exists installment_plan_id uuid references installment_plans (id) on delete set null;
+alter table expenses add column if not exists installment_index smallint;
+
+drop policy if exists "installment_plans_select" on installment_plans;
+create policy "installment_plans_select" on installment_plans
+  for select using (household_id = my_household_id());
+
+drop policy if exists "installment_plans_insert" on installment_plans;
+create policy "installment_plans_insert" on installment_plans
+  for insert with check (household_id = my_household_id() and created_by = auth.uid());
+
+drop policy if exists "installment_plans_update" on installment_plans;
+create policy "installment_plans_update" on installment_plans
+  for update using (household_id = my_household_id() and created_by = auth.uid());
+
+drop policy if exists "installment_plans_delete" on installment_plans;
+create policy "installment_plans_delete" on installment_plans
+  for delete using (household_id = my_household_id() and created_by = auth.uid());
 
 -- =====================================================================
 -- CATÉGORIES PAR DÉFAUT (insérées à la création d'un foyer, via trigger

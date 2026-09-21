@@ -1,7 +1,8 @@
-import { useState } from 'react';
-import { addExpense } from '../lib/data.js';
+import { useEffect, useState } from 'react';
+import { addExpense, getHouseholdPockets } from '../lib/data.js';
 import { useApp } from '../context/AppContext.jsx';
 import ScanReceipt from './ScanReceipt.jsx';
+import Installments from './Installments.jsx';
 
 const CATEGORIES = [
   { id: 'courses', label: 'Courses', icon: '🛒' },
@@ -18,21 +19,20 @@ const CATEGORIES = [
   { id: 'autres', label: 'Autres', icon: '➕' },
 ];
 
-const SOURCES = [
-  { id: 'perso', label: 'Mon compte perso' },
-  { id: 'compte_joint', label: 'Compte joint' },
-  { id: 'pocket', label: 'Une poche (tirelire, épargne…)' },
-];
-
 export default function AddExpense() {
   const { profile, currentBudgetMonth } = useApp();
-  const [mode, setMode] = useState('manual'); // manual | scan
+  const [mode, setMode] = useState('manual'); // manual | scan | installments
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState('courses');
-  const [sourceType, setSourceType] = useState('perso');
+  const [accountId, setAccountId] = useState('perso'); // 'perso' ou l'id d'un compte
+  const [accounts, setAccounts] = useState([]);
   const [merchant, setMerchant] = useState('');
   const [comment, setComment] = useState('');
   const [status, setStatus] = useState({ state: 'idle' });
+
+  useEffect(() => {
+    getHouseholdPockets(profile.household_id).then(setAccounts);
+  }, [profile.household_id]);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -49,7 +49,8 @@ export default function AddExpense() {
         household_id: profile.household_id,
         paid_by: profile.id,
         budget_month_id: currentBudgetMonth.id,
-        source_type: sourceType,
+        source_type: accountId === 'perso' ? 'perso' : 'pocket',
+        source_pocket_id: accountId === 'perso' ? null : accountId,
         amount: value,
         category,
         merchant: merchant || null,
@@ -72,22 +73,29 @@ export default function AddExpense() {
         <p className="text-ink/60 text-sm mt-1">Saisie rapide — quelques secondes suffisent.</p>
       </header>
 
-      <div className="flex bg-white rounded-2xl p-1 border border-teal-light">
+      <div className="flex bg-white rounded-2xl p-1 border border-teal-light text-xs">
         <button
           onClick={() => setMode('scan')}
-          className={`flex-1 rounded-xl py-2 text-sm font-semibold ${mode === 'scan' ? 'bg-teal text-white' : 'text-ink/60'}`}
+          className={`flex-1 rounded-xl py-2 font-semibold ${mode === 'scan' ? 'bg-teal text-white' : 'text-ink/60'}`}
         >
-          📸 Scanner un ticket
+          📸 Scanner
         </button>
         <button
           onClick={() => setMode('manual')}
-          className={`flex-1 rounded-xl py-2 text-sm font-semibold ${mode === 'manual' ? 'bg-teal text-white' : 'text-ink/60'}`}
+          className={`flex-1 rounded-xl py-2 font-semibold ${mode === 'manual' ? 'bg-teal text-white' : 'text-ink/60'}`}
         >
-          ✍️ Saisie manuelle
+          ✍️ Manuelle
+        </button>
+        <button
+          onClick={() => setMode('installments')}
+          className={`flex-1 rounded-xl py-2 font-semibold ${mode === 'installments' ? 'bg-teal text-white' : 'text-ink/60'}`}
+        >
+          🔁 Plusieurs fois
         </button>
       </div>
 
-      {mode === 'scan' && <ScanReceipt onDone={() => setMode('manual')} />}
+      {mode === 'scan' && <ScanReceipt onDone={() => setMode('manual')} accounts={accounts} />}
+      {mode === 'installments' && <Installments onDone={() => setMode('manual')} />}
 
       {mode === 'manual' && (
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -131,12 +139,15 @@ export default function AddExpense() {
           <div>
             <label className="text-sm font-medium text-ink/70">Payé depuis</label>
             <select
-              value={sourceType}
-              onChange={(e) => setSourceType(e.target.value)}
+              value={accountId}
+              onChange={(e) => setAccountId(e.target.value)}
               className="w-full mt-1 bg-white rounded-2xl px-4 py-3 border border-teal-light outline-none"
             >
-              {SOURCES.map((s) => (
-                <option key={s.id} value={s.id}>{s.label}</option>
+              <option value="perso">Mon compte perso</option>
+              {accounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.icon} {a.name}{a.usage_type === 'epargne' ? ' (épargne)' : ''}
+                </option>
               ))}
             </select>
           </div>
