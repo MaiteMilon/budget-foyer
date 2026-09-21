@@ -1,0 +1,480 @@
+import { useEffect, useMemo, useState } from 'react';
+import { useApp } from '../context/AppContext.jsx';
+import {
+  getMyCharges,
+  getCurrentMonthEntriesByCharge,
+  createCharge,
+  updateChargeTemplate,
+  deleteChargeTemplate,
+  upsertCurrentMonthEntry,
+  removeCurrentMonthEntry,
+  logSharedChargeAction,
+} from '../lib/charges.js';
+
+const CATEGORIES = [
+  'téléphone', 'assurance', 'abonnement', 'transport', 'crédit',
+  'école', 'logement', 'énergie', 'internet', 'mutuelle', 'autre',
+];
+
+function emptyForm() {
+  return {
+    label: '',
+    amount: '',
+    category: 'autre',
+    isShared: false,
+    isRecurring: true,
+    dueDay: '5',
+    oneOffDate: new Date().toISOString().slice(0, 10),
+    isActive: true,
+  };
+}
+
+function formatSchedule(charge) {
+  if (charge.is_recurring) {
+    return charge.due_day ? `Récurrente · le ${charge.due_day}` : 'Récurrente';
+  }
+  return charge.one_off_date
+    ? `Ponctuelle · ${new Date(charge.one_off_date).toLocaleDateString('fr-FR')}`
+    : 'Ponctuelle';
+}
+
+export default function Charges() {
+  const { profile, currentBudgetMonth, refresh } = useApp();
+  const [charges, setCharges] = useState([]);
+  const [entriesByCharge, setEntriesByCharge] = useState(new Map());
+  const [loading, setLoading] = useState(true);
+
+  const [formOpen, setFormOpen] = useState(false);
+  const [editingCharge, setEditingCharge] = useState(null); // null = création
+  const [form, setForm] = useState(emptyForm());
+  const [pendingScopeChoice, setPendingScopeChoice] = useState(null);
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  async function load() {
+    setLoading(true);
+    const [chargesList, entries] = await Promise.all([
+      getMyCharges(profile.household_id, profile.id),
+      getCurrentMonthEntriesByCharge(currentBudgetMonth.id),
+    ]);
+    setCharges(chargesList);
+    setEntriesByCharge(entries);
+    setLoading(false);
+  }
+
+  useEffect(() => { load(); }, [profile.household_id, currentBudgetMonth.id]);
+
+  const grouped = useMemo(() => {
+    const shared = charges.filter((c) => c.is_shared);
+    const personal = charges.filter((c) => !c.is_shared);
+    return { shared, personal };
+  }, [charges]);
+
+  function openCreate() {
+    setEditingCharge(null);
+    setForm(emptyForm());
+    setFormOpen(true);
+  }
+
+  function openEdit(charge) {
+    setEditingCharge(charge);
+    setForm({
+      label: charge.label,
+      amount: String(charge.default_amount),
+      category: charge.category,
+      isShared: charge.is_shared,
+      isRecurring: charge.is_recurring,
+      dueDay: String(charge.due_day || 5),
+      oneOffDate: charge.one_off_date || new Date().toISOString().slice(0, 10),
+      isActive: charge.is_active,
+    });
+    setFormOpen(true);
+  }
+
+  function closeForm() {
+    setFormOpen(false);
+    setEditingCharge(null);
+    setPendingScopeChoice(null);
+  }
+
+  async function applyChange(currentForm, scope) {
+    setSaving(true);
+    setError('');
+    try {
+      const amount = Number(String(currentForm.amount).replace(',', '.')) || 0;
+      let charge = editingCharge;
+
+      if (!charge) {
+        charge = await createCharge({
+          household_id: profile.household_id,
+          owner_id: currentForm.isShared ? null : profile.id,
+          label: currentForm.label,
+          category: currentForm.category,
+          is_shared: currentForm.isShared,
+          is_recurring: currentForm.isRecurring,
+          default_amount: amount,
+          due_day: currentForm.isRecurring ? Number(currentForm.dueDay) : null,
+          one_off_date: currentForm.isRecurring ? null : currentForm.oneOffDate,
+          is_active: currentForm.isActive,
+        });
+      } else if (scope === 'future' || !charge.is_recurring) {
+        charge = await updateChargeTemplate(charge.id, {
+          label: currentForm.label,
+          category: currentForm.category,
+          is_shared: currentForm.isShared,
+          owner_id: currentForm.isShared ? null : profile.id,
+          default_amount: amount,
+          due_day: currentForm.isRecurring ? Number(currentForm.dueDay) : null,
+          one_off_date: currentForm.isRecurring ? null : currentForm.oneOffDate,
+          is_active: currentForm.isActive,
+        });
+      } else {
+        if (charge.is_shared) {
+          await logSharedChargeAction(
+            profile.household_id,
+            profile.id,
+            `Charge modifiée pour ce mois uniquement : ${currentForm.label}`
+          );
+        }
+      }
+
+      if (currentForm.isActive) {
+        await upsertCurrentMonthEntry(currentBudgetMonth.id, charge, {
+          amount,
+          label: currentForm.label,
+          category: currentForm.category,
+          dueDate: currentForm.isRecurring ? null : currentForm.oneOffDate,
+        });
+      } else {
+        await removeCurrentMonthEntry(currentBudgetMonth.id, charge.id);
+      }
+
+      await load();
+      await refresh();
+      closeForm();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function handleSubmit(e) {
+    e.preventDefault();
+    if (!form.label || form.amount === '') return;
+
+    if (editingCharge && editingCharge.is_recurring) {
+      setPendingScopeChoice(form);
+    } else {
+      applyChange(form, null);
+    }
+  }
+
+  async function handleToggleActive(charge) {
+    const nextActive = !charge.is_active;
+    setSaving(true);
+    try {
+      await updateChargeTemplate(charge.id, { is_active: nextActive });
+      if (nextActive) {
+        await upsertCurrentMonthEntry(currentBudgetMonth.id, charge, {
+          amount: charge.default_amount,
+          label: charge.label,
+          category: charge.category,
+          dueDate: charge.is_recurring ? null : charge.one_off_date,
+        });
+      } else {
+        await removeCurrentMonthEntry(currentBudgetMonth.id, charge.id);
+      }
+      await load();
+      await refresh();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDelete(charge) {
+    const ok = window.confirm(
+      `Supprimer la charge "${charge.label}" ? Elle ne sera plus proposée les mois suivants ; les mois déjà préparés ne changent pas.`
+    );
+    if (!ok) return;
+    setSaving(true);
+    try {
+      await removeCurrentMonthEntry(currentBudgetMonth.id, charge.id);
+      await deleteChargeTemplate(charge.id);
+      await load();
+      await refresh();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (loading) return <p className="text-center text-ink/50 mt-20">Chargement…</p>;
+
+  return (
+    <div className="space-y-5 pb-4">
+      <header className="flex justify-between items-start">
+        <div>
+          <h1 className="text-2xl font-bold">Mes charges</h1>
+          <p className="text-ink/60 text-sm mt-1">
+            Toute modification s'applique immédiatement au budget de ce mois-ci.
+          </p>
+        </div>
+      </header>
+
+      {!formOpen && (
+        <button
+          onClick={openCreate}
+          className="w-full bg-teal text-white font-semibold rounded-card py-3"
+        >
+          + Nouvelle charge
+        </button>
+      )}
+
+      {formOpen && !pendingScopeChoice && (
+        <ChargeForm
+          form={form}
+          setForm={setForm}
+          categories={CATEGORIES}
+          isEditing={Boolean(editingCharge)}
+          onCancel={closeForm}
+          onSubmit={handleSubmit}
+          saving={saving}
+        />
+      )}
+
+      {pendingScopeChoice && (
+        <div className="bg-white rounded-card p-5 shadow-sm space-y-3">
+          <p className="text-sm font-medium">
+            Cette charge est récurrente. Appliquer la modification :
+          </p>
+          <button
+            onClick={() => applyChange(pendingScopeChoice, 'this_month')}
+            disabled={saving}
+            className="w-full bg-teal text-white font-semibold rounded-card py-3 disabled:opacity-50"
+          >
+            Modifier uniquement ce mois
+          </button>
+          <button
+            onClick={() => applyChange(pendingScopeChoice, 'future')}
+            disabled={saving}
+            className="w-full bg-white border border-teal-light text-teal font-semibold rounded-card py-3 disabled:opacity-50"
+          >
+            Modifier également les prochains mois
+          </button>
+          <button onClick={closeForm} className="w-full text-ink/50 text-sm py-1">
+            Annuler
+          </button>
+        </div>
+      )}
+
+      {error && <p className="text-coral text-sm text-center">{error}</p>}
+
+      <ChargeGroup
+        title="Charges communes"
+        charges={grouped.shared}
+        entriesByCharge={entriesByCharge}
+        onEdit={openEdit}
+        onDelete={handleDelete}
+        onToggleActive={handleToggleActive}
+      />
+      <ChargeGroup
+        title="Mes charges personnelles"
+        charges={grouped.personal}
+        entriesByCharge={entriesByCharge}
+        onEdit={openEdit}
+        onDelete={handleDelete}
+        onToggleActive={handleToggleActive}
+      />
+    </div>
+  );
+}
+
+function ChargeGroup({ title, charges, entriesByCharge, onEdit, onDelete, onToggleActive }) {
+  const active = charges.filter((c) => c.is_active);
+  const inactive = charges.filter((c) => !c.is_active);
+
+  return (
+    <section className="bg-white rounded-card p-5 shadow-sm">
+      <h2 className="font-semibold mb-3">{title}</h2>
+      {charges.length === 0 && <p className="text-sm text-ink/40">Aucune charge pour l'instant.</p>}
+
+      <ul className="space-y-2">
+        {active.map((c) => (
+          <ChargeRow key={c.id} charge={c} entry={entriesByCharge.get(c.id)} onEdit={onEdit} onDelete={onDelete} onToggleActive={onToggleActive} />
+        ))}
+      </ul>
+
+      {inactive.length > 0 && (
+        <details className="mt-3">
+          <summary className="text-xs text-ink/40 cursor-pointer">
+            {inactive.length} charge(s) inactive(s)
+          </summary>
+          <ul className="space-y-2 mt-2">
+            {inactive.map((c) => (
+              <ChargeRow key={c.id} charge={c} entry={entriesByCharge.get(c.id)} onEdit={onEdit} onDelete={onDelete} onToggleActive={onToggleActive} dimmed />
+            ))}
+          </ul>
+        </details>
+      )}
+    </section>
+  );
+}
+
+function ChargeRow({ charge, entry, onEdit, onDelete, onToggleActive, dimmed }) {
+  const displayedAmount = entry ? entry.amount : charge.default_amount;
+  const overridden = entry && Number(entry.amount) !== Number(charge.default_amount);
+
+  return (
+    <li className={`border border-teal-light rounded-2xl p-3 ${dimmed ? 'opacity-50' : ''}`}>
+      <div className="flex justify-between items-start gap-2">
+        <div className="min-w-0">
+          <p className="font-medium truncate">{charge.label}</p>
+          <p className="text-xs text-ink/50">
+            {formatSchedule(charge)} · {charge.category}
+            {overridden && ' · modifiée ce mois-ci'}
+          </p>
+        </div>
+        <span className="font-semibold shrink-0">{Number(displayedAmount).toLocaleString('fr-FR')} €</span>
+      </div>
+      <div className="flex justify-between items-center mt-2">
+        <label className="flex items-center gap-1.5 text-xs text-ink/60">
+          <input
+            type="checkbox"
+            checked={charge.is_active}
+            onChange={() => onToggleActive(charge)}
+          />
+          Active
+        </label>
+        <div className="flex gap-3 text-xs">
+          <button onClick={() => onEdit(charge)} className="text-teal font-medium">Modifier</button>
+          <button onClick={() => onDelete(charge)} className="text-coral font-medium">Supprimer</button>
+        </div>
+      </div>
+    </li>
+  );
+}
+
+function ChargeForm({ form, setForm, categories, isEditing, onCancel, onSubmit, saving }) {
+  return (
+    <form onSubmit={onSubmit} className="bg-white rounded-card p-5 shadow-sm space-y-3">
+      <h2 className="font-semibold">{isEditing ? 'Modifier la charge' : 'Nouvelle charge'}</h2>
+
+      <input
+        value={form.label}
+        onChange={(e) => setForm({ ...form, label: e.target.value })}
+        placeholder="Nom (ex. Loyer)"
+        required
+        className="w-full bg-cream rounded-xl px-3 py-2 border border-teal-light text-sm"
+      />
+
+      <div className="flex gap-2">
+        <div className="relative flex-1">
+          <input
+            inputMode="decimal"
+            value={form.amount}
+            onChange={(e) => setForm({ ...form, amount: e.target.value })}
+            placeholder="Montant"
+            required
+            className="w-full bg-cream rounded-xl px-3 py-2 pr-6 border border-teal-light text-sm"
+          />
+          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-ink/40 text-xs">€</span>
+        </div>
+        <select
+          value={form.category}
+          onChange={(e) => setForm({ ...form, category: e.target.value })}
+          className="flex-1 bg-cream rounded-xl px-3 py-2 border border-teal-light text-sm"
+        >
+          {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+      </div>
+
+      <div className="flex gap-4 text-sm">
+        <label className="flex items-center gap-2">
+          <input
+            type="radio"
+            checked={!form.isShared}
+            onChange={() => setForm({ ...form, isShared: false })}
+          />
+          Personnelle
+        </label>
+        <label className="flex items-center gap-2">
+          <input
+            type="radio"
+            checked={form.isShared}
+            onChange={() => setForm({ ...form, isShared: true })}
+          />
+          Commune
+        </label>
+      </div>
+
+      <div className="flex gap-4 text-sm">
+        <label className="flex items-center gap-2">
+          <input
+            type="radio"
+            checked={form.isRecurring}
+            onChange={() => setForm({ ...form, isRecurring: true })}
+          />
+          Récurrente
+        </label>
+        <label className="flex items-center gap-2">
+          <input
+            type="radio"
+            checked={!form.isRecurring}
+            onChange={() => setForm({ ...form, isRecurring: false })}
+          />
+          Ponctuelle
+        </label>
+      </div>
+
+      {form.isRecurring ? (
+        <div>
+          <label className="text-xs text-ink/60">Jour prévu de prélèvement</label>
+          <input
+            type="number"
+            min="1"
+            max="31"
+            value={form.dueDay}
+            onChange={(e) => setForm({ ...form, dueDay: e.target.value })}
+            className="w-full mt-1 bg-cream rounded-xl px-3 py-2 border border-teal-light text-sm"
+          />
+        </div>
+      ) : (
+        <div>
+          <label className="text-xs text-ink/60">Date</label>
+          <input
+            type="date"
+            value={form.oneOffDate}
+            onChange={(e) => setForm({ ...form, oneOffDate: e.target.value })}
+            className="w-full mt-1 bg-cream rounded-xl px-3 py-2 border border-teal-light text-sm"
+          />
+        </div>
+      )}
+
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={form.isActive}
+          onChange={(e) => setForm({ ...form, isActive: e.target.checked })}
+        />
+        Active (comptée dans le budget de ce mois-ci)
+      </label>
+
+      <div className="flex gap-2 pt-1">
+        <button type="button" onClick={onCancel} className="flex-1 text-sm text-ink/50 py-3">
+          Annuler
+        </button>
+        <button
+          type="submit"
+          disabled={saving}
+          className="flex-1 bg-teal text-white text-sm font-semibold rounded-xl py-3 disabled:opacity-50"
+        >
+          {saving ? 'Enregistrement…' : 'Enregistrer'}
+        </button>
+      </div>
+    </form>
+  );
+}
