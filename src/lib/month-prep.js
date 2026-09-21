@@ -77,6 +77,7 @@ export async function saveMonthPreparation({
         kind: i.kind,
         label: i.label || labelForKind(i.kind),
         amount: i.amount,
+        recurring_income_id: i.recurringIncomeId || null,
       }))
     );
     if (insIncomesError) throw insIncomesError;

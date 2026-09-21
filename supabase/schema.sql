@@ -60,12 +60,30 @@ create table budget_months (
 );
 
 -- Revenus du mois (salaire, revenus additionnels, remboursements, exceptionnels)
+-- Revenu fixe : le gabarit (mensualité qui se répète), géré indépendamment
+-- depuis l'écran Revenus, sur le même principe que fixed_charges/
+-- fixed_charge_entries. Toujours personnel (pas de notion de "commune"
+-- pour un revenu) — RLS restreinte au seul propriétaire plus bas.
+create table recurring_incomes (
+  id uuid primary key default uuid_generate_v4(),
+  household_id uuid not null references households (id) on delete cascade,
+  owner_id uuid not null references profiles (id) on delete cascade,
+  label text not null,
+  kind text not null check (kind in ('salaire','autre_revenu','remboursement','exceptionnel')),
+  default_amount numeric(10,2) not null,
+  is_active boolean not null default true, -- mis en pause sans perdre l'historique
+  created_at timestamptz not null default now()
+);
+
 create table incomes (
   id uuid primary key default uuid_generate_v4(),
   budget_month_id uuid not null references budget_months (id) on delete cascade,
   label text not null,                 -- "Salaire", "Remboursement mutuelle", ...
   kind text not null check (kind in ('salaire','autre_revenu','remboursement','exceptionnel')),
   amount numeric(10,2) not null check (amount >= 0),
+  -- Rempli si ce revenu provient d'un gabarit "fixe" ; NULL pour un
+  -- revenu ponctuel (aucun gabarit, ajouté une seule fois pour ce mois).
+  recurring_income_id uuid references recurring_incomes (id) on delete set null,
   created_at timestamptz not null default now()
 );
 
@@ -275,6 +293,7 @@ alter table profiles enable row level security;
 alter table household_invites enable row level security;
 alter table budget_months enable row level security;
 alter table incomes enable row level security;
+alter table recurring_incomes enable row level security;
 alter table savings_pockets enable row level security;
 alter table savings_goals enable row level security;
 alter table fixed_charges enable row level security;
@@ -355,6 +374,11 @@ create policy "incomes_household" on incomes
   for all using (
     budget_month_id in (select id from budget_months where household_id = my_household_id())
   );
+
+-- recurring_incomes : un revenu est toujours personnel, jamais commun —
+-- strictement réservé à son propriétaire, en lecture comme en écriture.
+create policy "recurring_incomes_owner" on recurring_incomes
+  for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
 
 -- savings_pockets : partagées si is_private = false OU owner = moi ;
 -- une poche marquée privée n'est visible que par son owner.
@@ -849,6 +873,29 @@ create policy "installment_plans_update" on installment_plans
 drop policy if exists "installment_plans_delete" on installment_plans;
 create policy "installment_plans_delete" on installment_plans
   for delete using (household_id = my_household_id() and created_by = auth.uid());
+
+-- ---------------------------------------------------------------------
+-- MIGRATION — Revenus fixes gérés indépendamment (écran Revenus, même
+-- principe que l'écran Charges). Idempotent.
+-- ---------------------------------------------------------------------
+
+create table if not exists recurring_incomes (
+  id uuid primary key default uuid_generate_v4(),
+  household_id uuid not null references households (id) on delete cascade,
+  owner_id uuid not null references profiles (id) on delete cascade,
+  label text not null,
+  kind text not null check (kind in ('salaire','autre_revenu','remboursement','exceptionnel')),
+  default_amount numeric(10,2) not null,
+  is_active boolean not null default true,
+  created_at timestamptz not null default now()
+);
+
+alter table recurring_incomes enable row level security;
+alter table incomes add column if not exists recurring_income_id uuid references recurring_incomes (id) on delete set null;
+
+drop policy if exists "recurring_incomes_owner" on recurring_incomes;
+create policy "recurring_incomes_owner" on recurring_incomes
+  for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
 
 -- =====================================================================
 -- CATÉGORIES PAR DÉFAUT (insérées à la création d'un foyer, via trigger

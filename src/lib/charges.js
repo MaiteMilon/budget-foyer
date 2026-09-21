@@ -15,7 +15,7 @@ import { supabase } from './supabaseClient.js';
  * le montant historique d'un mois passé si son gabarit est supprimé).
  */
 
-/** Charges visibles par cet utilisateur : les siennes + les communes (jamais les charges personnelles du conjoint). */
+/** Charges visibles par cet utilisateur : les siennes + les communes (jamais les charges personnelles de l'autre membre). */
 export async function getMyCharges(householdId, userId) {
   const { data, error } = await supabase
     .from('fixed_charges')

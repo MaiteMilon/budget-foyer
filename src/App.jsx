@@ -9,10 +9,12 @@ import Foyer from './pages/Foyer.jsx';
 import MonEspace from './pages/MonEspace.jsx';
 import PrepareMonth from './pages/PrepareMonth.jsx';
 import Charges from './pages/Charges.jsx';
+import Revenus from './pages/Revenus.jsx';
 
 const NAV_ITEMS = [
   { to: '/', label: 'Accueil', icon: '🏠', end: true },
   { to: '/depenses', label: 'Dépenses', icon: '🧾' },
+  { to: '/revenus', label: 'Revenus', icon: '💰' },
   { to: '/charges', label: 'Charges', icon: '📋' },
   { to: '/epargne', label: 'Épargne', icon: '🐷' },
   { to: '/foyer', label: 'Foyer', icon: '🤝' },
@@ -60,6 +62,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/depenses" element={<AddExpense />} />
+          <Route path="/revenus" element={<Revenus />} />
           <Route path="/epargne" element={<Epargne />} />
           <Route path="/charges" element={<Charges />} />
           <Route path="/foyer" element={<Foyer />} />

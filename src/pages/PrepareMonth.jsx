@@ -17,6 +17,7 @@ import {
   getRecurringChargeTemplates,
   saveMonthPreparation,
 } from '../lib/month-prep.js';
+import { getActiveRecurringIncomes } from '../lib/income.js';
 
 const INCOME_KINDS = [
   { id: 'salaire', label: 'Salaire' },
@@ -86,10 +87,12 @@ export default function PrepareMonth() {
         pGoals.forEach((g) => prevGoalsByPocket.set(g.pocket_id, g.planned_amount));
       }
 
-      const recurringTemplates =
+      const recurringChargeTemplates =
         existingCharges.length === 0
           ? await getRecurringChargeTemplates(profile.household_id, profile.id)
           : [];
+      const recurringIncomeTemplates =
+        existingIncomes.length === 0 ? await getActiveRecurringIncomes(profile.id) : [];
 
       if (cancelled) return;
 
@@ -100,14 +103,27 @@ export default function PrepareMonth() {
 
       if (existingIncomes.length > 0) {
         setIncomes(
-          existingIncomes.map((i) => ({ id: i.id, kind: i.kind, label: i.label, amount: String(i.amount) }))
+          existingIncomes.map((i) => ({
+            id: i.id, kind: i.kind, label: i.label, amount: String(i.amount),
+            recurringIncomeId: i.recurring_income_id || null,
+          }))
+        );
+      } else if (recurringIncomeTemplates.length > 0) {
+        // Uniquement les revenus fixes ACTIFS — un revenu désactivé ne doit
+        // plus jamais être reproposé (même correctif que pour les charges).
+        setIncomes(
+          recurringIncomeTemplates.map((t) => ({
+            id: uid(), kind: t.kind, label: t.label, amount: String(t.default_amount),
+            recurringIncomeId: t.id,
+          }))
         );
       } else if (prevIncomes.length > 0) {
+        // Repli pour un mois préparé avant l'écran Revenus (aucun gabarit encore créé).
         setIncomes(
-          prevIncomes.map((i) => ({ id: uid(), kind: i.kind, label: i.label, amount: String(i.amount) }))
+          prevIncomes.map((i) => ({ id: uid(), kind: i.kind, label: i.label, amount: String(i.amount), recurringIncomeId: null }))
         );
       } else {
-        setIncomes([{ id: uid(), kind: 'salaire', label: 'Salaire', amount: '' }]);
+        setIncomes([{ id: uid(), kind: 'salaire', label: 'Salaire', amount: '', recurringIncomeId: null }]);
       }
 
       if (existingCharges.length > 0) {
@@ -126,7 +142,7 @@ export default function PrepareMonth() {
         );
       } else {
         setCharges(
-          recurringTemplates.map((t) => ({
+          recurringChargeTemplates.map((t) => ({
             id: uid(),
             label: t.label,
             category: t.category,
@@ -236,7 +252,7 @@ export default function PrepareMonth() {
         safetyMargin: Number(String(safetyMargin).replace(',', '.')) || 0,
         incomes: incomes
           .filter((i) => i.amount !== '')
-          .map((i) => ({ kind: i.kind, label: i.label, amount: Number(String(i.amount).replace(',', '.')) || 0 })),
+          .map((i) => ({ kind: i.kind, label: i.label, amount: Number(String(i.amount).replace(',', '.')) || 0, recurringIncomeId: i.recurringIncomeId || null })),
         chargeEntries: charges
           .filter((c) => c.amount !== '')
           .map((c) => ({

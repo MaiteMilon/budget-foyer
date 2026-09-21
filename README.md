@@ -307,14 +307,24 @@ Ce qui en découle concrètement :
   suivants quand la charge y est suggérée ; il reste modifiable
   indépendamment "pour ce mois uniquement", comme le montant.
 
-## 15. Prochaines étapes (par ordre de priorité proposé)
+## 15. Écran Revenus (même principe que Charges)
+
+Un revenu peut être **fixe** (persiste jusqu'à suppression, exactement
+comme une charge récurrente : actif/inactif, modification "ce mois
+uniquement" ou "aussi les prochains mois", suggéré automatiquement chaque
+mois tant qu'il est actif) ou **ponctuel** (une seule ligne ajoutée au
+mois en cours, sans gabarit, sans jamais réapparaître ensuite). Toujours
+personnel — pas de notion de "commun" pour un revenu, contrairement aux
+charges. `src/pages/Revenus.jsx`, `src/lib/income.js`.
+
+## 16. Prochaines étapes (par ordre de priorité proposé)
 
 1. **Notifications** (§16) : Web Push via le service worker déjà généré
    par `vite-plugin-pwa`, déclenchées par des fonctions Supabase Edge sur
    les seuils (50 % du budget, délai de réflexion terminé, etc.).
 2. **Export CSV/PDF** (§20).
 
-## 16. Pour tester à deux dès maintenant
+## 17. Pour tester à deux dès maintenant
 
 1. Créer un projet Supabase, exécuter `supabase/schema.sql` dans son
    éditeur SQL, renseigner `.env` (voir §5).
