@@ -14,24 +14,31 @@ export default function Epargne() {
   const [showAddPocket, setShowAddPocket] = useState(false);
   const [transferringId, setTransferringId] = useState(null);
   const [error, setError] = useState('');
+  const [loadError, setLoadError] = useState(null);
 
   async function load() {
     setLoading(true);
-    const [pocketsList, goals, expenses] = await Promise.all([
-      getHouseholdPockets(profile.household_id),
-      getMonthSavingsGoals(currentBudgetMonth.id),
-      getMonthExpenses(currentBudgetMonth.id, profile.id),
-    ]);
-    setPockets(pocketsList);
-    setGoalsByPocket(new Map(goals.map((g) => [g.pocket_id, g])));
+    setLoadError(null);
+    try {
+      const [pocketsList, goals, expenses] = await Promise.all([
+        getHouseholdPockets(profile.household_id),
+        getMonthSavingsGoals(currentBudgetMonth.id),
+        getMonthExpenses(currentBudgetMonth.id, profile.id),
+      ]);
+      setPockets(pocketsList);
+      setGoalsByPocket(new Map(goals.map((g) => [g.pocket_id, g])));
 
-    const spentMap = new Map();
-    expenses.forEach((e) => {
-      if (!e.source_pocket_id) return;
-      spentMap.set(e.source_pocket_id, (spentMap.get(e.source_pocket_id) || 0) + Number(e.amount));
-    });
-    setSpentByPocket(spentMap);
-    setLoading(false);
+      const spentMap = new Map();
+      expenses.forEach((e) => {
+        if (!e.source_pocket_id) return;
+        spentMap.set(e.source_pocket_id, (spentMap.get(e.source_pocket_id) || 0) + Number(e.amount));
+      });
+      setSpentByPocket(spentMap);
+    } catch (err) {
+      setLoadError(err.message || String(err));
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => { load(); }, [profile.household_id, currentBudgetMonth.id]);
@@ -81,6 +88,16 @@ export default function Epargne() {
     } catch (err) {
       setError(err.message);
     }
+  }
+
+  if (loadError) {
+    return (
+      <div className="text-center mt-20 px-4">
+        <p className="text-4xl mb-2">⚠️</p>
+        <p className="font-semibold mb-2">Impossible de charger Épargne</p>
+        <p className="text-sm text-coral bg-coral-light rounded-xl px-4 py-3 break-words">{loadError}</p>
+      </div>
+    );
   }
 
   if (loading) return <p className="text-center text-ink/50 mt-20">Chargement…</p>;
