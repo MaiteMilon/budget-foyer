@@ -52,24 +52,31 @@ export default function Foyer() {
   const [pockets, setPockets] = useState([]);
   const [activity, setActivity] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const [inviteMsg, setInviteMsg] = useState('');
 
   async function load() {
     setLoading(true);
-    const [householdMembers, householdPockets, activityLog] = await Promise.all([
-      getHouseholdMembers(profile.household_id),
-      getHouseholdPockets(profile.household_id),
-      getHouseholdActivity(profile.household_id),
-    ]);
-    setMembers(householdMembers);
-    setPockets(householdPockets);
-    setActivity(activityLog);
+    setLoadError(null);
+    try {
+      const [householdMembers, householdPockets, activityLog] = await Promise.all([
+        getHouseholdMembers(profile.household_id),
+        getHouseholdPockets(profile.household_id),
+        getHouseholdActivity(profile.household_id),
+      ]);
+      setMembers(householdMembers);
+      setPockets(householdPockets);
+      setActivity(activityLog);
 
-    const budgets = await Promise.all(
-      householdMembers.map((m) => loadMemberBudget(m, currentBudgetMonth.month))
-    );
-    setMemberBudgets(budgets);
-    setLoading(false);
+      const budgets = await Promise.all(
+        householdMembers.map((m) => loadMemberBudget(m, currentBudgetMonth.month))
+      );
+      setMemberBudgets(budgets);
+    } catch (err) {
+      setLoadError(err.message || String(err));
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => { load(); }, [profile.household_id, currentBudgetMonth.month]);
@@ -78,6 +85,16 @@ export default function Foyer() {
     const invite = await createInvite(profile.household_id, profile.id);
     await navigator.clipboard?.writeText(inviteLink(invite.code));
     setInviteMsg(`Lien copié — code ${invite.code}`);
+  }
+
+  if (loadError) {
+    return (
+      <div className="text-center mt-20 px-4">
+        <p className="text-4xl mb-2">⚠️</p>
+        <p className="font-semibold mb-2">Impossible de charger Foyer</p>
+        <p className="text-sm text-coral bg-coral-light rounded-xl px-4 py-3 break-words">{loadError}</p>
+      </div>
+    );
   }
 
   if (loading) return <p className="text-center text-ink/50 mt-20">Chargement…</p>;
