@@ -49,7 +49,7 @@ export async function getOrCreateBudgetMonth(householdId, userId, monthDate) {
 
 /**
  * Lecture SEULE du mois budgétaire d'un utilisateur (typiquement le
- * conjoint, pour la vue "Notre foyer") — ne crée jamais de mois pour
+ * d'un autre membre, pour la vue "Notre foyer") — ne crée jamais de mois pour
  * quelqu'un d'autre ; retourne null si ce membre n'a encore rien préparé.
  */
 export async function getBudgetMonthForUser(userId, monthDate) {
@@ -117,7 +117,7 @@ export async function addPocket(pocket) {
 }
 
 /**
- * Supprime une poche. Aucune validation croisée du conjoint n'est
+ * Supprime une poche. Aucune validation croisée de l'autre membre n'est
  * demandée (poche commune modifiable/suppressible à égalité par les deux
  * membres) — seule une confirmation de la personne qui agit est requise,
  * et c'est à l'UI de l'afficher juste avant cet appel (window.confirm ou
@@ -162,12 +162,13 @@ export async function addExpense(expense) {
   return data;
 }
 
-/** Envies d'achat — toujours filtrées par owner_id = utilisateur courant (RLS + belt-and-braces côté client). */
+/** Envies d'achat en attente — toujours filtrées par owner_id = utilisateur courant (RLS + belt-and-braces côté client). */
 export async function getMyWishlist(userId) {
   const { data, error } = await supabase
     .from('wishlist_items')
     .select('*')
     .eq('owner_id', userId)
+    .eq('status', 'pending')
     .order('created_at', { ascending: false });
   if (error) throw error;
   return data;
@@ -177,4 +178,22 @@ export async function addWishlistItem(item) {
   const { data, error } = await supabase.from('wishlist_items').insert(item).select().single();
   if (error) throw error;
   return data;
+}
+
+/** Marque une envie comme achetée et la relie à la dépense (ou au 1er versement de l'échéancier) qui en résulte. */
+export async function markWishlistPurchased(itemId, resultingExpenseId) {
+  const { error } = await supabase
+    .from('wishlist_items')
+    .update({ status: 'purchased', resulting_expense_id: resultingExpenseId || null })
+    .eq('id', itemId);
+  if (error) throw error;
+}
+
+/** Retire une envie de la liste sans jamais l'acheter (ex. "je n'en veux plus"). */
+export async function dismissWishlistItem(itemId) {
+  const { error } = await supabase
+    .from('wishlist_items')
+    .update({ status: 'dismissed' })
+    .eq('id', itemId);
+  if (error) throw error;
 }
