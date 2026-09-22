@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext.jsx';
+import { getHouseholdMembers, getBudgetMonthForUser } from '../lib/data.js';
 import {
   getMyRecurringIncomes,
   getCurrentMonthEntriesByIncome,
@@ -25,6 +26,7 @@ function emptyForm() {
 export default function Revenus() {
   const { profile, currentBudgetMonth, refresh } = useApp();
   const [incomes, setIncomes] = useState([]);
+  const [members, setMembers] = useState([]);
   const [entriesByIncome, setEntriesByIncome] = useState(new Map());
   const [loading, setLoading] = useState(true);
 
@@ -41,12 +43,25 @@ export default function Revenus() {
     setLoading(true);
     setLoadError(null);
     try {
-      const [list, entries] = await Promise.all([
-        getMyRecurringIncomes(profile.id),
+      const [list, entries, householdMembers] = await Promise.all([
+        getMyRecurringIncomes(profile.household_id),
         getCurrentMonthEntriesByIncome(currentBudgetMonth.id),
+        getHouseholdMembers(profile.household_id),
       ]);
+
+      const otherPerson = householdMembers.find((m) => m.id !== profile.id);
+      let mergedEntries = entries;
+      if (otherPerson) {
+        const otherMonth = await getBudgetMonthForUser(otherPerson.id, currentBudgetMonth.month);
+        if (otherMonth) {
+          const otherEntries = await getCurrentMonthEntriesByIncome(otherMonth.id);
+          mergedEntries = new Map([...entries, ...otherEntries]);
+        }
+      }
+
       setIncomes(list);
-      setEntriesByIncome(entries);
+      setEntriesByIncome(mergedEntries);
+      setMembers(householdMembers);
     } catch (err) {
       setLoadError(err.message || String(err));
     } finally {
@@ -54,7 +69,7 @@ export default function Revenus() {
     }
   }
 
-  useEffect(() => { load(); }, [profile.id, currentBudgetMonth.id]);
+  useEffect(() => { load(); }, [profile.household_id, currentBudgetMonth.id]);
 
   function openCreate() {
     setEditing(null);
@@ -202,8 +217,11 @@ export default function Revenus() {
 
   if (loading) return <p className="text-center text-ink/50 mt-20">Chargement…</p>;
 
-  const active = incomes.filter((i) => i.is_active);
-  const inactive = incomes.filter((i) => !i.is_active);
+  const mine = incomes.filter((i) => i.owner_id === profile.id);
+  const others = incomes.filter((i) => i.owner_id !== profile.id);
+  const otherMember = members.find((m) => m.id !== profile.id);
+  const mineActive = mine.filter((i) => i.is_active);
+  const mineInactive = mine.filter((i) => !i.is_active);
 
   return (
     <div className="space-y-5 pb-4">
@@ -262,18 +280,18 @@ export default function Revenus() {
       {error && <p className="text-coral text-sm text-center">{error}</p>}
 
       <section className="bg-white rounded-card p-5 shadow-sm">
-        <h2 className="font-semibold mb-3">Revenus fixes</h2>
-        {incomes.length === 0 && <p className="text-sm text-ink/40">Aucun revenu fixe pour l'instant.</p>}
+        <h2 className="font-semibold mb-3">Mes revenus fixes</h2>
+        {mine.length === 0 && <p className="text-sm text-ink/40">Aucun revenu fixe pour l'instant.</p>}
         <ul className="space-y-2">
-          {active.map((i) => (
+          {mineActive.map((i) => (
             <IncomeRow key={i.id} income={i} entry={entriesByIncome.get(i.id)} onEdit={openEdit} onDelete={handleDelete} onToggleActive={handleToggleActive} />
           ))}
         </ul>
-        {inactive.length > 0 && (
+        {mineInactive.length > 0 && (
           <details className="mt-3">
-            <summary className="text-xs text-ink/40 cursor-pointer">{inactive.length} revenu(s) inactif(s)</summary>
+            <summary className="text-xs text-ink/40 cursor-pointer">{mineInactive.length} revenu(s) inactif(s)</summary>
             <ul className="space-y-2 mt-2">
-              {inactive.map((i) => (
+              {mineInactive.map((i) => (
                 <IncomeRow key={i.id} income={i} entry={entriesByIncome.get(i.id)} onEdit={openEdit} onDelete={handleDelete} onToggleActive={handleToggleActive} dimmed />
               ))}
             </ul>
@@ -283,11 +301,24 @@ export default function Revenus() {
           Pour un revenu ponctuel (sans suite les mois suivants), utilisez "+ Nouveau revenu" et choisissez "Ponctuel" — il n'apparaîtra pas dans cette liste, seulement dans le mois en cours.
         </p>
       </section>
+
+      <section className="bg-white rounded-card p-5 shadow-sm">
+        <h2 className="font-semibold mb-3">
+          Revenus {otherMember ? `de ${otherMember.display_name}` : 'de l\'autre membre'}
+        </h2>
+        {others.length === 0 && <p className="text-sm text-ink/40">Aucun revenu fixe renseigné.</p>}
+        <ul className="space-y-2">
+          {others.map((i) => (
+            <IncomeRow key={i.id} income={i} entry={entriesByIncome.get(i.id)} readOnly dimmed={!i.is_active} />
+          ))}
+        </ul>
+        <p className="text-xs text-ink/30 mt-3">Lecture seule — chacun gère uniquement ses propres revenus.</p>
+      </section>
     </div>
   );
 }
 
-function IncomeRow({ income, entry, onEdit, onDelete, onToggleActive, dimmed }) {
+function IncomeRow({ income, entry, onEdit, onDelete, onToggleActive, dimmed, readOnly }) {
   const displayedAmount = entry ? entry.amount : income.default_amount;
   const overridden = entry && Number(entry.amount) !== Number(income.default_amount);
   const kindLabel = KINDS.find((k) => k.id === income.kind)?.label || income.kind;
@@ -298,21 +329,23 @@ function IncomeRow({ income, entry, onEdit, onDelete, onToggleActive, dimmed }) 
         <div className="min-w-0">
           <p className="font-medium truncate">{income.label}</p>
           <p className="text-xs text-ink/50">
-            {kindLabel}{overridden && ' · modifié ce mois-ci'}
+            {kindLabel}{overridden && ' · modifié ce mois-ci'}{!income.is_active && ' · inactif'}
           </p>
         </div>
         <span className="font-semibold shrink-0 text-teal">+{Number(displayedAmount).toLocaleString('fr-FR')} €</span>
       </div>
-      <div className="flex justify-between items-center mt-2">
-        <label className="flex items-center gap-1.5 text-xs text-ink/60">
-          <input type="checkbox" checked={income.is_active} onChange={() => onToggleActive(income)} />
-          Actif
-        </label>
-        <div className="flex gap-3 text-xs">
-          <button onClick={() => onEdit(income)} className="text-teal font-medium">Modifier</button>
-          <button onClick={() => onDelete(income)} className="text-coral font-medium">Supprimer</button>
+      {!readOnly && (
+        <div className="flex justify-between items-center mt-2">
+          <label className="flex items-center gap-1.5 text-xs text-ink/60">
+            <input type="checkbox" checked={income.is_active} onChange={() => onToggleActive(income)} />
+            Actif
+          </label>
+          <div className="flex gap-3 text-xs">
+            <button onClick={() => onEdit(income)} className="text-teal font-medium">Modifier</button>
+            <button onClick={() => onDelete(income)} className="text-coral font-medium">Supprimer</button>
+          </div>
         </div>
-      </div>
+      )}
     </li>
   );
 }

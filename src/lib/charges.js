@@ -16,12 +16,12 @@ import { supabase } from './supabaseClient.js';
  */
 
 /** Charges visibles par cet utilisateur : les siennes + les communes (jamais les charges personnelles de l'autre membre). */
+/** Toutes les charges du foyer, siennes et celles de l'autre membre — l'app est transparente entre les deux (sauf éléments explicitement privés : comptes, projets, envies d'achat). */
 export async function getMyCharges(householdId, userId) {
   const { data, error } = await supabase
     .from('fixed_charges')
     .select('*')
     .eq('household_id', householdId)
-    .or(`is_shared.eq.true,owner_id.eq.${userId}`)
     .order('created_at', { ascending: true });
   if (error) throw error;
   return data;

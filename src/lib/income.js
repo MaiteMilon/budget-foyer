@@ -12,11 +12,12 @@ import { supabase } from './supabaseClient.js';
  *    `incomes` pour le mois en cours (voir addPonctualIncome).
  */
 
-export async function getMyRecurringIncomes(userId) {
+/** Tous les revenus fixes du foyer, siens et ceux de l'autre membre — transparence entre les deux, comme pour les charges. */
+export async function getMyRecurringIncomes(householdId) {
   const { data, error } = await supabase
     .from('recurring_incomes')
     .select('*')
-    .eq('owner_id', userId)
+    .eq('household_id', householdId)
     .order('created_at', { ascending: true });
   if (error) throw error;
   return data;

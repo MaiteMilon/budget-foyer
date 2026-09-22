@@ -317,14 +317,39 @@ mois en cours, sans gabarit, sans jamais réapparaître ensuite). Toujours
 personnel — pas de notion de "commun" pour un revenu, contrairement aux
 charges. `src/pages/Revenus.jsx`, `src/lib/income.js`.
 
-## 16. Prochaines étapes (par ordre de priorité proposé)
+## 16. Transparence entre les deux membres du foyer
+
+Changement de principe important, à la demande explicite de l'utilisatrice :
+l'app était par défaut trop cloisonnée entre les deux membres (chacun ne
+voyait que ses propres charges/revenus). Le nouveau principe : **tout est
+visible par les deux, sauf ce qui est explicitement privé.**
+
+- **Charges et Revenus** : chacun voit désormais ceux de l'autre, dans une
+  section séparée, en lecture seule (modifier/supprimer reste réservé au
+  propriétaire — RLS mise à jour sur `recurring_incomes`, cf. migration
+  dans `schema.sql`, sécurité déjà correcte sur `fixed_charges`).
+- **Accueil** : "Reste à dépenser" affiche désormais le total du foyer
+  (les deux personnes cumulées), avec le détail par personne juste
+  en dessous. La carte "Mes projets" (ex-"Objectifs d'épargne") reste
+  déjà correctement soumise à la case "privé" existante sur les comptes.
+- **Foyer** : corrige au passage une fuite trouvée pendant le test — un
+  compte marqué privé apparaissait quand même dans la vue "Notre foyer"
+  (totaux et liste). Filtré désormais, y compris pour son propre
+  propriétaire, puisque "Foyer" est justement la vue commune.
+- **Reste strictement privé, sans exception** : les envies d'achat,
+  et tout compte/projet explicitement coché "privé".
+- Nouveau fichier `src/lib/memberBudget.js` : calcul du budget d'un
+  membre du foyer, partagé entre `Dashboard.jsx` et `Foyer.jsx` pour
+  éviter la duplication.
+
+## 17. Prochaines étapes (par ordre de priorité proposé)
 
 1. **Notifications** (§16) : Web Push via le service worker déjà généré
    par `vite-plugin-pwa`, déclenchées par des fonctions Supabase Edge sur
    les seuils (50 % du budget, délai de réflexion terminé, etc.).
 2. **Export CSV/PDF** (§20).
 
-## 17. Pour tester à deux dès maintenant
+## 18. Pour tester à deux dès maintenant
 
 1. Créer un projet Supabase, exécuter `supabase/schema.sql` dans son
    éditeur SQL, renseigner `.env` (voir §5).

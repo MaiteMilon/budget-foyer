@@ -1,23 +1,23 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { computeMonthlyBudget, computeGoalProgress } from '../lib/budget-engine.js';
+import { computeGoalProgress } from '../lib/budget-engine.js';
 import { useApp } from '../context/AppContext.jsx';
 import { signOut } from '../lib/auth.js';
 import { addMonthsISO, monthLabel, isNearMonthEnd } from '../lib/date-utils.js';
 import {
-  getMonthIncomes,
   getMonthSavingsGoals,
-  getMonthFixedCharges,
   getMonthExpenses,
   getBudgetMonthForUser,
   getHouseholdPockets,
+  getHouseholdMembers,
 } from '../lib/data.js';
+import { loadMemberBudget } from '../lib/memberBudget.js';
 
 export default function Dashboard() {
   const { profile, currentBudgetMonth, refresh } = useApp();
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
-  const [budget, setBudget] = useState(null);
+  const [memberBudgets, setMemberBudgets] = useState([]);
   const [goals, setGoals] = useState([]);
   const [pocketsWithTarget, setPocketsWithTarget] = useState([]);
   const [depenseAccounts, setDepenseAccounts] = useState([]);
@@ -31,24 +31,20 @@ export default function Dashboard() {
       setLoading(true);
       setLoadError(null);
       try {
-        const [incomes, monthGoals, charges, expenses, pockets] = await Promise.all([
-          getMonthIncomes(currentBudgetMonth.id),
+        const [members, monthGoals, expenses, pockets] = await Promise.all([
+          getHouseholdMembers(profile.household_id),
           getMonthSavingsGoals(currentBudgetMonth.id),
-          getMonthFixedCharges(currentBudgetMonth.id),
           getMonthExpenses(currentBudgetMonth.id, profile.id),
           getHouseholdPockets(profile.household_id),
         ]);
         if (cancelled) return;
 
-        setBudget(
-          computeMonthlyBudget({
-            safetyMargin: currentBudgetMonth.safety_margin,
-            incomes,
-            savingsGoals: monthGoals.map((g) => ({ plannedAmount: g.planned_amount })),
-            fixedCharges: charges,
-            expenses: expenses.map((e) => ({ amount: e.amount, sourceType: e.source_type, pocketUsageType: e.source_pocket?.usage_type })),
-          })
+        const budgets = await Promise.all(
+          members.map((m) => loadMemberBudget(m, currentBudgetMonth.month))
         );
+        if (cancelled) return;
+        setMemberBudgets(budgets);
+
         setGoals(
           monthGoals.map((g) => ({
             pocket: g.pocket,
@@ -104,9 +100,22 @@ export default function Dashboard() {
     );
   }
 
-  if (loading || !budget) {
+  if (loading) {
     return <p className="text-center text-ink/50 mt-20">Chargement…</p>;
   }
+
+  const prepared = memberBudgets.filter((b) => b.budget);
+  const householdTotals = prepared.length > 0
+    ? {
+        initialBudget: prepared.reduce((s, b) => s + b.budget.initialBudget, 0),
+        totalSpent: prepared.reduce((s, b) => s + b.budget.totalSpent, 0),
+        remaining: prepared.reduce((s, b) => s + b.budget.remaining, 0),
+      }
+    : null;
+  const spentRatio = householdTotals && householdTotals.initialBudget > 0
+    ? Math.min(1, Math.max(0, householdTotals.totalSpent / householdTotals.initialBudget))
+    : 0;
+  const myBudget = memberBudgets.find((b) => b.member.id === profile.id)?.budget;
 
   return (
     <div className="space-y-5">
@@ -142,32 +151,55 @@ export default function Dashboard() {
       )}
 
       <section className="bg-teal text-white rounded-card p-6 shadow-sm">
-        <p className="text-sm text-white/80 font-medium">Reste à dépenser ce mois-ci</p>
-        <p className="text-5xl font-extrabold tracking-tight mt-1">
-          {budget.remaining.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} €
-        </p>
+        <p className="text-sm text-white/80 font-medium">Reste à dépenser du foyer</p>
+        {householdTotals ? (
+          <>
+            <p className="text-5xl font-extrabold tracking-tight mt-1">
+              {householdTotals.remaining.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} €
+            </p>
+            <div className="mt-4 h-2 rounded-full bg-white/20 overflow-hidden">
+              <div className="h-full bg-white rounded-full transition-all" style={{ width: `${Math.round(spentRatio * 100)}%` }} />
+            </div>
+            <dl className="mt-4 grid grid-cols-3 gap-2 text-sm">
+              <div>
+                <dt className="text-white/70">Budget initial</dt>
+                <dd className="font-semibold">{householdTotals.initialBudget.toLocaleString('fr-FR')} €</dd>
+              </div>
+              <div>
+                <dt className="text-white/70">Dépensé</dt>
+                <dd className="font-semibold">{householdTotals.totalSpent.toLocaleString('fr-FR')} €</dd>
+              </div>
+              <div>
+                <dt className="text-white/70">Reste</dt>
+                <dd className="font-semibold">{householdTotals.remaining.toLocaleString('fr-FR')} €</dd>
+              </div>
+            </dl>
+          </>
+        ) : (
+          <p className="text-2xl font-bold mt-1">— €</p>
+        )}
+        {prepared.length < memberBudgets.length && (
+          <p className="text-xs text-white/70 mt-3">
+            {prepared.length === 0
+              ? "Personne n'a encore préparé ce mois-ci."
+              : "L'autre membre n'a pas encore préparé son mois — ce total ne compte que ce qui est déjà prêt."}
+          </p>
+        )}
 
-        <div className="mt-4 h-2 rounded-full bg-white/20 overflow-hidden">
-          <div
-            className="h-full bg-white rounded-full transition-all"
-            style={{ width: `${Math.round(budget.spentRatio * 100)}%` }}
-          />
+        <div className="mt-4 pt-4 border-t border-white/20 space-y-2">
+          {memberBudgets.map(({ member, budget }) => (
+            <div key={member.id} className="flex justify-between items-center text-sm">
+              <span className="font-medium">{member.display_name}</span>
+              {budget ? (
+                <span className="text-white/90">
+                  {budget.initialBudget.toLocaleString('fr-FR')} € init. · {budget.totalSpent.toLocaleString('fr-FR')} € dépensé · <strong>{budget.remaining.toLocaleString('fr-FR')} € reste</strong>
+                </span>
+              ) : (
+                <span className="text-white/60 text-xs">Mois non préparé</span>
+              )}
+            </div>
+          ))}
         </div>
-
-        <dl className="mt-4 grid grid-cols-3 gap-2 text-sm">
-          <div>
-            <dt className="text-white/70">Budget initial</dt>
-            <dd className="font-semibold">{budget.initialBudget.toLocaleString('fr-FR')} €</dd>
-          </div>
-          <div>
-            <dt className="text-white/70">Dépensé</dt>
-            <dd className="font-semibold">{budget.totalSpent.toLocaleString('fr-FR')} €</dd>
-          </div>
-          <div>
-            <dt className="text-white/70">Reste</dt>
-            <dd className="font-semibold">{budget.remaining.toLocaleString('fr-FR')} €</dd>
-          </div>
-        </dl>
       </section>
 
       {depenseAccounts.length > 0 && (
@@ -232,7 +264,7 @@ export default function Dashboard() {
 
       {pocketsWithTarget.length > 0 && (
         <section className="bg-white rounded-card p-5 shadow-sm">
-          <h2 className="font-semibold mb-3">Objectifs d'épargne</h2>
+          <h2 className="font-semibold mb-3">Mes projets</h2>
           <ul className="space-y-4">
             {pocketsWithTarget.map((p) => {
               const ratio = Math.min(1, Number(p.balance) / Number(p.target_amount));
@@ -268,21 +300,23 @@ export default function Dashboard() {
         </section>
       )}
 
-      <section className="bg-white rounded-card p-5 shadow-sm">
-        <div className="flex justify-between items-center mb-3">
-          <h2 className="font-semibold">Mon budget</h2>
-          <Link to="/preparer" className="text-xs text-teal underline">
-            Modifier ma préparation
-          </Link>
-        </div>
-        <dl className="text-sm divide-y divide-teal-light">
-          <Row label="Revenus" value={budget.totalIncome} />
-          <Row label="Charges fixes" value={-budget.totalFixedCharges} />
-          <Row label="Épargne prévue" value={-budget.totalPlannedSavings} />
-          <Row label="Marge de sécurité" value={-budget.safetyMargin} />
-          <Row label="Dépenses" value={-budget.totalSpent} strong />
-        </dl>
-      </section>
+      {myBudget && (
+        <section className="bg-white rounded-card p-5 shadow-sm">
+          <div className="flex justify-between items-center mb-3">
+            <h2 className="font-semibold">Mon budget</h2>
+            <Link to="/preparer" className="text-xs text-teal underline">
+              Modifier ma préparation
+            </Link>
+          </div>
+          <dl className="text-sm divide-y divide-teal-light">
+            <Row label="Revenus" value={myBudget.totalIncome} />
+            <Row label="Charges fixes" value={-myBudget.totalFixedCharges} />
+            <Row label="Épargne prévue" value={-myBudget.totalPlannedSavings} />
+            <Row label="Marge de sécurité" value={-myBudget.safetyMargin} />
+            <Row label="Dépenses" value={-myBudget.totalSpent} strong />
+          </dl>
+        </section>
+      )}
     </div>
   );
 }

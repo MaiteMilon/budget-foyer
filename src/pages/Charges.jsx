@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useApp } from '../context/AppContext.jsx';
-import { getHouseholdPockets } from '../lib/data.js';
+import { getHouseholdPockets, getHouseholdMembers, getBudgetMonthForUser } from '../lib/data.js';
 import {
   getMyCharges,
   getCurrentMonthEntriesByCharge,
@@ -46,6 +46,7 @@ export default function Charges() {
   const [charges, setCharges] = useState([]);
   const [entriesByCharge, setEntriesByCharge] = useState(new Map());
   const [accounts, setAccounts] = useState([]);
+  const [members, setMembers] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const [formOpen, setFormOpen] = useState(false);
@@ -57,14 +58,30 @@ export default function Charges() {
 
   async function load() {
     setLoading(true);
-    const [chargesList, entries, accountsList] = await Promise.all([
+    const [chargesList, entries, accountsList, householdMembers] = await Promise.all([
       getMyCharges(profile.household_id, profile.id),
       getCurrentMonthEntriesByCharge(currentBudgetMonth.id),
       getHouseholdPockets(profile.household_id),
+      getHouseholdMembers(profile.household_id),
     ]);
+
+    // Les entrées du mois de l'AUTRE membre vivent dans SON propre mois
+    // budgétaire (un budget_months par personne) — il faut les récupérer
+    // séparément pour afficher ses charges avec leurs vraies valeurs.
+    const otherPerson = householdMembers.find((m) => m.id !== profile.id);
+    let mergedEntries = entries;
+    if (otherPerson) {
+      const otherMonth = await getBudgetMonthForUser(otherPerson.id, currentBudgetMonth.month);
+      if (otherMonth) {
+        const otherEntries = await getCurrentMonthEntriesByCharge(otherMonth.id);
+        mergedEntries = new Map([...entries, ...otherEntries]);
+      }
+    }
+
     setCharges(chargesList);
-    setEntriesByCharge(entries);
+    setEntriesByCharge(mergedEntries);
     setAccounts(accountsList);
+    setMembers(householdMembers);
     setLoading(false);
   }
 
@@ -72,9 +89,12 @@ export default function Charges() {
 
   const grouped = useMemo(() => {
     const shared = charges.filter((c) => c.is_shared);
-    const personal = charges.filter((c) => !c.is_shared);
-    return { shared, personal };
-  }, [charges]);
+    const mine = charges.filter((c) => !c.is_shared && c.owner_id === profile.id);
+    const others = charges.filter((c) => !c.is_shared && c.owner_id !== profile.id);
+    return { shared, mine, others };
+  }, [charges, profile.id]);
+
+  const otherMember = members.find((m) => m.id !== profile.id);
 
   function openCreate() {
     setEditingCharge(null);
@@ -311,29 +331,35 @@ export default function Charges() {
       />
       <ChargeGroup
         title="Mes charges personnelles"
-        charges={grouped.personal}
+        charges={grouped.mine}
         entriesByCharge={entriesByCharge}
         onEdit={openEdit}
         onDelete={handleDelete}
         onToggleActive={handleToggleActive}
         onTogglePaid={handleTogglePaid}
       />
+      <ChargeGroup
+        title={`Charges ${otherMember ? `de ${otherMember.display_name}` : "de l'autre membre"}`}
+        charges={grouped.others}
+        entriesByCharge={entriesByCharge}
+        readOnly
+      />
     </div>
   );
 }
 
-function ChargeGroup({ title, charges, entriesByCharge, onEdit, onDelete, onToggleActive, onTogglePaid }) {
+function ChargeGroup({ title, charges, entriesByCharge, onEdit, onDelete, onToggleActive, onTogglePaid, readOnly }) {
   const active = charges.filter((c) => c.is_active);
   const inactive = charges.filter((c) => !c.is_active);
 
   return (
     <section className="bg-white rounded-card p-5 shadow-sm">
       <h2 className="font-semibold mb-3">{title}</h2>
-      {charges.length === 0 && <p className="text-sm text-ink/40">Aucune charge pour l'instant.</p>}
+      {charges.length === 0 && <p className="text-sm text-ink/40">{readOnly ? 'Aucune charge renseignée.' : "Aucune charge pour l'instant."}</p>}
 
       <ul className="space-y-2">
         {active.map((c) => (
-          <ChargeRow key={c.id} charge={c} entry={entriesByCharge.get(c.id)} onEdit={onEdit} onDelete={onDelete} onToggleActive={onToggleActive} onTogglePaid={onTogglePaid} />
+          <ChargeRow key={c.id} charge={c} entry={entriesByCharge.get(c.id)} onEdit={onEdit} onDelete={onDelete} onToggleActive={onToggleActive} onTogglePaid={onTogglePaid} readOnly={readOnly} />
         ))}
       </ul>
 
@@ -344,16 +370,19 @@ function ChargeGroup({ title, charges, entriesByCharge, onEdit, onDelete, onTogg
           </summary>
           <ul className="space-y-2 mt-2">
             {inactive.map((c) => (
-              <ChargeRow key={c.id} charge={c} entry={entriesByCharge.get(c.id)} onEdit={onEdit} onDelete={onDelete} onToggleActive={onToggleActive} onTogglePaid={onTogglePaid} dimmed />
+              <ChargeRow key={c.id} charge={c} entry={entriesByCharge.get(c.id)} onEdit={onEdit} onDelete={onDelete} onToggleActive={onToggleActive} onTogglePaid={onTogglePaid} dimmed readOnly={readOnly} />
             ))}
           </ul>
         </details>
+      )}
+      {readOnly && charges.length > 0 && (
+        <p className="text-xs text-ink/30 mt-3">Lecture seule — chacun gère uniquement ses propres charges.</p>
       )}
     </section>
   );
 }
 
-function ChargeRow({ charge, entry, onEdit, onDelete, onToggleActive, onTogglePaid, dimmed }) {
+function ChargeRow({ charge, entry, onEdit, onDelete, onToggleActive, onTogglePaid, dimmed, readOnly }) {
   const displayedAmount = entry ? entry.amount : charge.default_amount;
   const overridden = entry && Number(entry.amount) !== Number(charge.default_amount);
 
@@ -369,34 +398,42 @@ function ChargeRow({ charge, entry, onEdit, onDelete, onToggleActive, onTogglePa
         </div>
         <span className="font-semibold shrink-0">{Number(displayedAmount).toLocaleString('fr-FR')} €</span>
       </div>
-      <div className="flex justify-between items-center mt-2">
-        <label className="flex items-center gap-1.5 text-xs text-ink/60">
-          <input
-            type="checkbox"
-            checked={charge.is_active}
-            onChange={() => onToggleActive(charge)}
-          />
-          Active
-        </label>
-        <div className="flex gap-3 text-xs">
-          <button onClick={() => onEdit(charge)} className="text-teal font-medium">Modifier</button>
-          <button onClick={() => onDelete(charge)} className="text-coral font-medium">Supprimer</button>
-        </div>
-      </div>
-      {entry && (
-        <div className="mt-2 pt-2 border-t border-teal-light/60 flex justify-between items-center">
-          <label className="flex items-center gap-1.5 text-xs text-ink/60">
-            <input
-              type="checkbox"
-              checked={entry.is_paid}
-              onChange={() => onTogglePaid(entry)}
-            />
-            Payée ce mois-ci
-          </label>
-          {entry.source_pocket_id && (
-            <span className="text-xs text-ink/40">Prélevée sur un compte suivi</span>
+      {readOnly ? (
+        <p className="text-xs text-ink/40 mt-2">
+          {charge.is_active ? 'Active' : 'Inactive'}{entry?.is_paid && ' · payée ce mois-ci'}
+        </p>
+      ) : (
+        <>
+          <div className="flex justify-between items-center mt-2">
+            <label className="flex items-center gap-1.5 text-xs text-ink/60">
+              <input
+                type="checkbox"
+                checked={charge.is_active}
+                onChange={() => onToggleActive(charge)}
+              />
+              Active
+            </label>
+            <div className="flex gap-3 text-xs">
+              <button onClick={() => onEdit(charge)} className="text-teal font-medium">Modifier</button>
+              <button onClick={() => onDelete(charge)} className="text-coral font-medium">Supprimer</button>
+            </div>
+          </div>
+          {entry && (
+            <div className="mt-2 pt-2 border-t border-teal-light/60 flex justify-between items-center">
+              <label className="flex items-center gap-1.5 text-xs text-ink/60">
+                <input
+                  type="checkbox"
+                  checked={entry.is_paid}
+                  onChange={() => onTogglePaid(entry)}
+                />
+                Payée ce mois-ci
+              </label>
+              {entry.source_pocket_id && (
+                <span className="text-xs text-ink/40">Prélevée sur un compte suivi</span>
+              )}
+            </div>
           )}
-        </div>
+        </>
       )}
     </li>
   );

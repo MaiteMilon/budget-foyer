@@ -375,10 +375,19 @@ create policy "incomes_household" on incomes
     budget_month_id in (select id from budget_months where household_id = my_household_id())
   );
 
--- recurring_incomes : un revenu est toujours personnel, jamais commun —
--- strictement réservé à son propriétaire, en lecture comme en écriture.
-create policy "recurring_incomes_owner" on recurring_incomes
-  for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+-- recurring_incomes : chaque personne modifie/supprime uniquement les
+-- siens, mais TOUT le foyer peut les CONSULTER — l'app doit être
+-- transparente entre les deux membres, ce que seules les envies d'achat
+-- (wishlist_items) et les éléments explicitement cochés "privés"
+-- (comptes, projets) n'ont pas à respecter.
+create policy "recurring_incomes_select" on recurring_incomes
+  for select using (household_id = my_household_id());
+create policy "recurring_incomes_insert" on recurring_incomes
+  for insert with check (household_id = my_household_id() and owner_id = auth.uid());
+create policy "recurring_incomes_update" on recurring_incomes
+  for update using (owner_id = auth.uid());
+create policy "recurring_incomes_delete" on recurring_incomes
+  for delete using (owner_id = auth.uid());
 
 -- savings_pockets : partagées si is_private = false OU owner = moi ;
 -- une poche marquée privée n'est visible que par son owner.
@@ -893,9 +902,21 @@ create table if not exists recurring_incomes (
 alter table recurring_incomes enable row level security;
 alter table incomes add column if not exists recurring_income_id uuid references recurring_incomes (id) on delete set null;
 
+-- MIGRATION — transparence entre membres du foyer sur les revenus fixes :
+-- consultation par tous, modification réservée au propriétaire.
 drop policy if exists "recurring_incomes_owner" on recurring_incomes;
-create policy "recurring_incomes_owner" on recurring_incomes
-  for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+drop policy if exists "recurring_incomes_select" on recurring_incomes;
+create policy "recurring_incomes_select" on recurring_incomes
+  for select using (household_id = my_household_id());
+drop policy if exists "recurring_incomes_insert" on recurring_incomes;
+create policy "recurring_incomes_insert" on recurring_incomes
+  for insert with check (household_id = my_household_id() and owner_id = auth.uid());
+drop policy if exists "recurring_incomes_update" on recurring_incomes;
+create policy "recurring_incomes_update" on recurring_incomes
+  for update using (owner_id = auth.uid());
+drop policy if exists "recurring_incomes_delete" on recurring_incomes;
+create policy "recurring_incomes_delete" on recurring_incomes
+  for delete using (owner_id = auth.uid());
 
 -- =====================================================================
 -- CATÉGORIES PAR DÉFAUT (insérées à la création d'un foyer, via trigger
