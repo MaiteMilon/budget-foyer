@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getHouseholdPockets, deletePocket, addPocket, getMonthSavingsGoals, getMonthExpenses } from '../lib/data.js';
+import { getHouseholdPockets, deletePocket, addPocket, updatePocket, getMonthSavingsGoals, getMonthExpenses } from '../lib/data.js';
 import { recordPocketTransfer } from '../lib/transfers.js';
 import { computeGoalProgress } from '../lib/budget-engine.js';
 import { useApp } from '../context/AppContext.jsx';
@@ -12,6 +12,7 @@ export default function Epargne() {
   const [spentByPocket, setSpentByPocket] = useState(new Map());
   const [loading, setLoading] = useState(true);
   const [showAddPocket, setShowAddPocket] = useState(false);
+  const [editingPocket, setEditingPocket] = useState(null); // null | poche en cours de modification
   const [transferringId, setTransferringId] = useState(null);
   const [error, setError] = useState('');
   const [loadError, setLoadError] = useState(null);
@@ -50,6 +51,11 @@ export default function Epargne() {
     await load();
   }
 
+  function openEdit(pocket) {
+    setShowAddPocket(false);
+    setEditingPocket(pocket);
+  }
+
   async function handleAddPocket({ name, kind, usageType, isPrivate, targetAmount, targetDate }) {
     setError('');
     try {
@@ -67,6 +73,27 @@ export default function Epargne() {
       });
       setShowAddPocket(false);
       await load();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function handleUpdatePocket({ name, kind, usageType, isPrivate, targetAmount, targetDate }) {
+    setError('');
+    try {
+      await updatePocket(editingPocket.id, {
+        owner_id: isPrivate ? profile.id : null,
+        name,
+        icon: POCKET_KINDS.find((k) => k.id === kind)?.icon || editingPocket.icon,
+        kind,
+        usage_type: usageType,
+        is_private: isPrivate,
+        target_amount: targetAmount,
+        target_date: targetDate,
+      });
+      setEditingPocket(null);
+      await load();
+      await refresh();
     } catch (err) {
       setError(err.message);
     }
@@ -119,6 +146,14 @@ export default function Epargne() {
 
       {error && <p className="text-coral text-sm text-center">{error}</p>}
 
+      {editingPocket && (
+        <QuickAddPocketForm
+          initial={editingPocket}
+          onCancel={() => setEditingPocket(null)}
+          onSubmit={handleUpdatePocket}
+        />
+      )}
+
       <section>
         <h2 className="font-semibold mb-3">Comptes de dépense</h2>
         <ul className="space-y-3">
@@ -164,12 +199,10 @@ export default function Epargne() {
                     >
                       {transferringId === p.id ? 'Annuler' : '+ Approvisionner'}
                     </button>
-                    <button
-                      onClick={() => handleDelete(p)}
-                      className="text-coral text-xs underline"
-                    >
-                      Supprimer
-                    </button>
+                    <div className="flex gap-3 text-xs">
+                      <button onClick={() => openEdit(p)} className="text-teal font-medium">Modifier</button>
+                      <button onClick={() => handleDelete(p)} className="text-coral font-medium">Supprimer</button>
+                    </div>
                   </div>
                 )}
 
@@ -243,12 +276,10 @@ export default function Epargne() {
                     >
                       {transferringId === p.id ? 'Annuler' : '+ Verser'}
                     </button>
-                    <button
-                      onClick={() => handleDelete(p)}
-                      className="text-coral text-xs underline"
-                    >
-                      Supprimer
-                    </button>
+                    <div className="flex gap-3 text-xs">
+                      <button onClick={() => openEdit(p)} className="text-teal font-medium">Modifier</button>
+                      <button onClick={() => handleDelete(p)} className="text-coral font-medium">Supprimer</button>
+                    </div>
                   </div>
                 )}
 
@@ -267,12 +298,14 @@ export default function Epargne() {
       {showAddPocket ? (
         <QuickAddPocketForm onCancel={() => setShowAddPocket(false)} onSubmit={handleAddPocket} />
       ) : (
-        <button
-          onClick={() => setShowAddPocket(true)}
-          className="w-full bg-white border border-teal-light text-teal font-semibold rounded-card py-4"
-        >
-          + Ajouter un compte
-        </button>
+        !editingPocket && (
+          <button
+            onClick={() => setShowAddPocket(true)}
+            className="w-full bg-white border border-teal-light text-teal font-semibold rounded-card py-4"
+          >
+            + Ajouter un compte
+          </button>
+        )
       )}
     </div>
   );
