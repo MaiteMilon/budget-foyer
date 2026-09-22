@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getHouseholdPockets, deletePocket, addPocket, updatePocket, getMonthSavingsGoals, getMonthExpenses } from '../lib/data.js';
+import { getHouseholdPockets, deletePocket, addPocket, updatePocket, correctPocketBalance, getMonthSavingsGoals, getMonthExpenses } from '../lib/data.js';
 import { recordPocketTransfer } from '../lib/transfers.js';
 import { computeGoalProgress } from '../lib/budget-engine.js';
 import { useApp } from '../context/AppContext.jsx';
@@ -14,6 +14,7 @@ export default function Epargne() {
   const [showAddPocket, setShowAddPocket] = useState(false);
   const [editingPocket, setEditingPocket] = useState(null); // null | poche en cours de modification
   const [transferringId, setTransferringId] = useState(null);
+  const [correctingId, setCorrectingId] = useState(null); // null | poche dont on corrige le solde réel
   const [error, setError] = useState('');
   const [loadError, setLoadError] = useState(null);
 
@@ -117,6 +118,17 @@ export default function Epargne() {
     }
   }
 
+  async function handleCorrectBalance(pocket, newBalance) {
+    setError('');
+    try {
+      await correctPocketBalance(pocket.id, newBalance);
+      setCorrectingId(null);
+      await load();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
   if (loadError) {
     return (
       <div className="text-center mt-20 px-4">
@@ -200,6 +212,7 @@ export default function Epargne() {
                       {transferringId === p.id ? 'Annuler' : '+ Approvisionner'}
                     </button>
                     <div className="flex gap-3 text-xs">
+                      <button onClick={() => setCorrectingId(correctingId === p.id ? null : p.id)} className="text-ink/50 font-medium">Corriger le solde</button>
                       <button onClick={() => openEdit(p)} className="text-teal font-medium">Modifier</button>
                       <button onClick={() => handleDelete(p)} className="text-coral font-medium">Supprimer</button>
                     </div>
@@ -208,6 +221,9 @@ export default function Epargne() {
 
                 {transferringId === p.id && (
                   <TransferForm onSubmit={(amount) => handleTransfer(p, amount)} />
+                )}
+                {correctingId === p.id && (
+                  <CorrectBalanceForm currentBalance={p.balance} onSubmit={(value) => handleCorrectBalance(p, value)} />
                 )}
               </li>
             );
@@ -277,6 +293,7 @@ export default function Epargne() {
                       {transferringId === p.id ? 'Annuler' : '+ Verser'}
                     </button>
                     <div className="flex gap-3 text-xs">
+                      <button onClick={() => setCorrectingId(correctingId === p.id ? null : p.id)} className="text-ink/50 font-medium">Corriger le solde</button>
                       <button onClick={() => openEdit(p)} className="text-teal font-medium">Modifier</button>
                       <button onClick={() => handleDelete(p)} className="text-coral font-medium">Supprimer</button>
                     </div>
@@ -285,6 +302,9 @@ export default function Epargne() {
 
                 {transferringId === p.id && (
                   <TransferForm onSubmit={(amount) => handleTransfer(p, amount)} />
+                )}
+                {correctingId === p.id && (
+                  <CorrectBalanceForm currentBalance={p.balance} onSubmit={(value) => handleCorrectBalance(p, value)} />
                 )}
               </li>
             );
@@ -345,6 +365,53 @@ function TransferForm({ onSubmit }) {
       >
         OK
       </button>
+    </form>
+  );
+}
+
+/**
+ * Distinct de "+Verser" : fixe directement le solde réel du compte (ex.
+ * rattraper de l'argent déjà mis de côté avant d'utiliser l'app), sans
+ * jamais toucher l'objectif ni le "versé" d'aucun mois.
+ */
+function CorrectBalanceForm({ currentBalance, onSubmit }) {
+  const [amount, setAmount] = useState(String(currentBalance ?? ''));
+  const [submitting, setSubmitting] = useState(false);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    const value = Number(String(amount).replace(',', '.'));
+    if (Number.isNaN(value) || value < 0) return;
+    setSubmitting(true);
+    await onSubmit(value);
+    setSubmitting(false);
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="mt-3 space-y-2">
+      <p className="text-xs text-ink/50">
+        Solde réel actuel du compte — ne compte dans le "versé" d'aucun mois, sert juste à rattraper la réalité.
+      </p>
+      <div className="flex gap-2">
+        <div className="relative flex-1">
+          <input
+            inputMode="decimal"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            placeholder="Solde réel"
+            autoFocus
+            className="w-full bg-cream rounded-xl px-3 py-2 pr-6 border border-teal-light text-sm"
+          />
+          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-ink/40 text-xs">€</span>
+        </div>
+        <button
+          type="submit"
+          disabled={submitting}
+          className="bg-ink/70 text-white text-sm font-semibold rounded-xl px-4 disabled:opacity-50"
+        >
+          OK
+        </button>
+      </div>
     </form>
   );
 }
