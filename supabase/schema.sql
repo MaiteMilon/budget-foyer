@@ -110,6 +110,10 @@ create table savings_pockets (
   target_amount numeric(10,2), -- objectif d'épargne total (epargne) OU enveloppe mensuelle (depense)
   target_date date,
   balance numeric(10,2) not null default 0,  -- solde réellement constaté
+  -- Ordre d'affichage choisi par l'utilisateur (flèches ▲▼ sur Épargne) —
+  -- en millisecondes depuis epoch par défaut, pour que chaque nouveau
+  -- compte se place naturellement en dernier sans calcul côté app.
+  sort_order bigint not null default (extract(epoch from now()) * 1000)::bigint,
   created_at timestamptz not null default now()
 );
 
@@ -120,9 +124,32 @@ create table savings_goals (
   pocket_id uuid not null references savings_pockets (id) on delete cascade,
   planned_amount numeric(10,2) not null default 0,   -- OBJECTIF DU MOIS
   actual_paid_in numeric(10,2) not null default 0,   -- MONTANT RÉELLEMENT VERSÉ
+  -- Rempli si ce montant provient d'un gabarit (versement habituel),
+  -- même principe que recurring_incomes/fixed_charges. Permet de
+  -- désactiver un versement "pour ce mois seulement" (ex. pas de salaire
+  -- ce mois-ci) sans jamais perdre le montant habituel pour plus tard.
+  recurring_goal_id uuid,
   created_at timestamptz not null default now(),
   unique (budget_month_id, pocket_id)
 );
+
+-- Gabarit du versement d'épargne habituel d'une personne sur un compte —
+-- toujours personnel (même compte commun = deux gabarits distincts, un
+-- par personne), avec une case "actif" pour suspendre un mois précis
+-- sans jamais effacer le montant habituel.
+create table recurring_savings_goals (
+  id uuid primary key default uuid_generate_v4(),
+  household_id uuid not null references households (id) on delete cascade,
+  owner_id uuid not null references profiles (id) on delete cascade,
+  pocket_id uuid not null references savings_pockets (id) on delete cascade,
+  default_amount numeric(10,2) not null,
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  unique (owner_id, pocket_id)
+);
+
+alter table savings_goals add constraint savings_goals_recurring_goal_id_fkey
+  foreign key (recurring_goal_id) references recurring_savings_goals (id) on delete set null;
 
 -- ---------------------------------------------------------------------
 -- 4. CHARGES FIXES
@@ -317,6 +344,7 @@ alter table incomes enable row level security;
 alter table recurring_incomes enable row level security;
 alter table savings_pockets enable row level security;
 alter table savings_goals enable row level security;
+alter table recurring_savings_goals enable row level security;
 alter table fixed_charges enable row level security;
 alter table fixed_charge_entries enable row level security;
 alter table expenses enable row level security;
@@ -441,6 +469,17 @@ create policy "savings_goals_household" on savings_goals
         and (is_private = false or owner_id = auth.uid())
     )
   );
+
+-- recurring_savings_goals : même transparence que les revenus fixes —
+-- consultation par tout le foyer, modification réservée au propriétaire.
+create policy "recurring_savings_goals_select" on recurring_savings_goals
+  for select using (household_id = my_household_id());
+create policy "recurring_savings_goals_insert" on recurring_savings_goals
+  for insert with check (household_id = my_household_id() and owner_id = auth.uid());
+create policy "recurring_savings_goals_update" on recurring_savings_goals
+  for update using (owner_id = auth.uid());
+create policy "recurring_savings_goals_delete" on recurring_savings_goals
+  for delete using (owner_id = auth.uid());
 
 -- Tout le foyer peut LIRE toutes les charges (utile pour "Mon budget" et
 -- la vue foyer), mais seule une charge commune (is_shared = true) est
@@ -834,6 +873,22 @@ $$;
 
 grant execute on function create_household(text) to authenticated;
 
+-- Quitter son foyer : redevient "sans foyer" (retour à l'écran de
+-- création/rejoindre), sans supprimer les données du foyer quitté.
+create or replace function leave_household()
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  perform set_config('app.allow_household_change', 'true', true);
+  update profiles set household_id = null where id = auth.uid();
+end;
+$$;
+
+grant execute on function leave_household() to authenticated;
+
 create or replace function accept_household_invite(p_code text)
 returns households
 language plpgsql
@@ -978,6 +1033,51 @@ create policy "projects_update" on projects
 drop policy if exists "projects_delete" on projects;
 create policy "projects_delete" on projects
   for delete using (household_id = my_household_id() and (is_private = false or owner_id = auth.uid()));
+
+-- MIGRATION — ordre d'affichage personnalisé des comptes (flèches ▲▼).
+alter table savings_pockets add column if not exists sort_order bigint;
+update savings_pockets set sort_order = (extract(epoch from created_at) * 1000)::bigint where sort_order is null;
+alter table savings_pockets alter column sort_order set default (extract(epoch from now()) * 1000)::bigint;
+alter table savings_pockets alter column sort_order set not null;
+
+-- MIGRATION — Gabarits de versements d'épargne habituels (même principe
+-- que les charges/revenus fixes) : montant qui persiste, case "actif"
+-- pour suspendre un mois précis sans jamais l'effacer.
+create table if not exists recurring_savings_goals (
+  id uuid primary key default uuid_generate_v4(),
+  household_id uuid not null references households (id) on delete cascade,
+  owner_id uuid not null references profiles (id) on delete cascade,
+  pocket_id uuid not null references savings_pockets (id) on delete cascade,
+  default_amount numeric(10,2) not null,
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  unique (owner_id, pocket_id)
+);
+alter table recurring_savings_goals enable row level security;
+
+alter table savings_goals add column if not exists recurring_goal_id uuid;
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'savings_goals_recurring_goal_id_fkey'
+  ) then
+    alter table savings_goals add constraint savings_goals_recurring_goal_id_fkey
+      foreign key (recurring_goal_id) references recurring_savings_goals (id) on delete set null;
+  end if;
+end $$;
+
+drop policy if exists "recurring_savings_goals_select" on recurring_savings_goals;
+create policy "recurring_savings_goals_select" on recurring_savings_goals
+  for select using (household_id = my_household_id());
+drop policy if exists "recurring_savings_goals_insert" on recurring_savings_goals;
+create policy "recurring_savings_goals_insert" on recurring_savings_goals
+  for insert with check (household_id = my_household_id() and owner_id = auth.uid());
+drop policy if exists "recurring_savings_goals_update" on recurring_savings_goals;
+create policy "recurring_savings_goals_update" on recurring_savings_goals
+  for update using (owner_id = auth.uid());
+drop policy if exists "recurring_savings_goals_delete" on recurring_savings_goals;
+create policy "recurring_savings_goals_delete" on recurring_savings_goals
+  for delete using (owner_id = auth.uid());
 
 -- =====================================================================
 -- CATÉGORIES PAR DÉFAUT (insérées à la création d'un foyer, via trigger

@@ -76,3 +76,9 @@ export async function getHouseholdActivity(householdId, limit = 20) {
   if (error) throw error;
   return data;
 }
+
+/** Quitte le foyer courant — redevient "sans foyer", sans supprimer aucune donnée du foyer quitté. */
+export async function leaveHousehold() {
+  const { error } = await supabase.rpc('leave_household');
+  if (error) throw error;
+}

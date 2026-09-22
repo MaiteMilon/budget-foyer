@@ -34,6 +34,7 @@ export default function QuickAddPocketForm({ onSubmit, onCancel, initial }) {
   const [isPrivate, setIsPrivate] = useState(initial?.is_private || false);
   const [targetAmount, setTargetAmount] = useState(initial?.target_amount ? String(initial.target_amount) : '');
   const [targetDate, setTargetDate] = useState(initial?.target_date || '');
+  const [monthlyAmount, setMonthlyAmount] = useState(initial?.monthlyAmount ? String(initial.monthlyAmount) : '');
   const [submitting, setSubmitting] = useState(false);
 
   async function handleSubmit(e) {
@@ -47,6 +48,7 @@ export default function QuickAddPocketForm({ onSubmit, onCancel, initial }) {
       isPrivate,
       targetAmount: targetAmount ? Number(targetAmount.replace(',', '.')) : null,
       targetDate: usageType === 'epargne' && targetDate ? targetDate : null,
+      monthlyAmount: usageType === 'epargne' && monthlyAmount ? Number(monthlyAmount.replace(',', '.')) : null,
     });
     setSubmitting(false);
   }
@@ -93,6 +95,25 @@ export default function QuickAddPocketForm({ onSubmit, onCancel, initial }) {
       >
         {POCKET_KINDS.map((k) => <option key={k.id} value={k.id}>{k.icon} {k.label}</option>)}
       </select>
+
+      {usageType === 'epargne' && (
+        <div>
+          <label className="text-xs text-ink/60">Montant que je compte mettre chaque mois (optionnel)</label>
+          <div className="relative mt-1">
+            <input
+              inputMode="decimal"
+              value={monthlyAmount}
+              onChange={(e) => setMonthlyAmount(e.target.value)}
+              placeholder="ex. 50"
+              className="w-full bg-cream rounded-xl px-3 py-2 pr-6 border border-teal-light text-sm"
+            />
+            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-ink/40 text-xs">€</span>
+          </div>
+          <p className="text-xs text-ink/40 mt-1">
+            Apparaîtra directement dans "Préparer mon mois" — modifiable, ou désactivable un mois précis, à tout moment.
+          </p>
+        </div>
+      )}
 
       <div>
         <label className="text-xs text-ink/60">

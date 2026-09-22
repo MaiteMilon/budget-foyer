@@ -105,9 +105,20 @@ export async function getHouseholdPockets(householdId) {
   const { data, error } = await supabase
     .from('savings_pockets')
     .select('*')
-    .eq('household_id', householdId);
+    .eq('household_id', householdId)
+    .order('sort_order', { ascending: true });
   if (error) throw error;
   return data;
+}
+
+/** Échange l'ordre d'affichage entre deux comptes (flèches ▲▼ sur Épargne). */
+export async function swapPocketOrder(pocketA, pocketB) {
+  const [{ error: errorA }, { error: errorB }] = await Promise.all([
+    supabase.from('savings_pockets').update({ sort_order: pocketB.sort_order }).eq('id', pocketA.id),
+    supabase.from('savings_pockets').update({ sort_order: pocketA.sort_order }).eq('id', pocketB.id),
+  ]);
+  if (errorA) throw errorA;
+  if (errorB) throw errorB;
 }
 
 export async function addPocket(pocket) {

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getHouseholdActivity, inviteLink, createInvite, getActiveInvite } from '../lib/household.js';
+import { getHouseholdActivity, inviteLink, createInvite, getActiveInvite, leaveHousehold } from '../lib/household.js';
 import { useApp } from '../context/AppContext.jsx';
 import {
   getHouseholdMembers,
@@ -19,7 +19,7 @@ function timeAgo(dateString) {
 }
 
 export default function Foyer() {
-  const { profile, currentBudgetMonth } = useApp();
+  const { profile, currentBudgetMonth, refresh } = useApp();
   const [members, setMembers] = useState([]);
   const [memberBudgets, setMemberBudgets] = useState([]);
   const [pockets, setPockets] = useState([]);
@@ -29,6 +29,9 @@ export default function Foyer() {
   const [activeInvite, setActiveInvite] = useState(null);
   const [inviteMsg, setInviteMsg] = useState('');
   const [generatingInvite, setGeneratingInvite] = useState(false);
+  const [manageOpen, setManageOpen] = useState(false);
+  const [leaving, setLeaving] = useState(false);
+  const [leaveError, setLeaveError] = useState('');
 
   async function load() {
     setLoading(true);
@@ -44,6 +47,7 @@ export default function Foyer() {
       setPockets(householdPockets);
       setActivity(activityLog);
       setActiveInvite(invite);
+      setManageOpen(householdMembers.length < 2);
 
       const budgets = await Promise.all(
         householdMembers.map((m) => loadMemberBudget(m, currentBudgetMonth.month))
@@ -73,6 +77,22 @@ export default function Foyer() {
     if (!activeInvite) return;
     await navigator.clipboard?.writeText(inviteLink(activeInvite.code));
     setInviteMsg('Lien copié !');
+  }
+
+  async function handleLeave() {
+    const ok = window.confirm(
+      "Quitter ce foyer ? Vous n'aurez plus accès à ses comptes, charges et revenus communs. Les données du foyer restent intactes pour l'autre membre."
+    );
+    if (!ok) return;
+    setLeaving(true);
+    setLeaveError('');
+    try {
+      await leaveHousehold();
+      await refresh();
+    } catch (err) {
+      setLeaveError(err.message);
+      setLeaving(false);
+    }
   }
 
   if (loadError) {
@@ -108,47 +128,66 @@ export default function Foyer() {
         </p>
       </header>
 
-      {members.length < 2 && (
-        <section className="bg-white rounded-card p-5 shadow-sm">
-          <h2 className="font-semibold mb-1">Inviter l'autre membre du foyer</h2>
-          <p className="text-xs text-ink/50 mb-3">
-            Le lien expire après 7 jours — régénérez-en un nouveau s'il ne fonctionne plus.
-          </p>
+      <section className="bg-white rounded-card p-5 shadow-sm">
+        <button onClick={() => setManageOpen(!manageOpen)} className="w-full flex justify-between items-center">
+          <h2 className="font-semibold">Gérer mon foyer</h2>
+          <span className="text-ink/40 text-xs">{manageOpen ? '▲' : '▼'}</span>
+        </button>
 
-          {activeInvite ? (
-            <>
-              <div className="bg-teal-light rounded-2xl p-4 text-center mb-3">
-                <p className="text-xs text-ink/50 mb-1">Code d'invitation</p>
-                <p className="text-3xl font-extrabold tracking-widest text-teal">{activeInvite.code}</p>
-              </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={handleCopyInvite}
-                  className="flex-1 bg-teal text-white text-sm font-semibold rounded-xl py-3"
-                >
-                  Copier le lien
-                </button>
+        {manageOpen && (
+          <div className="mt-3 pt-3 border-t border-teal-light space-y-4">
+            <div>
+              <p className="text-sm font-medium mb-1">Inviter quelqu'un</p>
+              <p className="text-xs text-ink/50 mb-3">
+                Le lien expire après 7 jours — régénérez-en un nouveau s'il ne fonctionne plus ou pour inviter quelqu'un d'autre.
+              </p>
+              {activeInvite ? (
+                <>
+                  <div className="bg-teal-light rounded-2xl p-4 text-center mb-3">
+                    <p className="text-xs text-ink/50 mb-1">Code d'invitation</p>
+                    <p className="text-3xl font-extrabold tracking-widest text-teal">{activeInvite.code}</p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleCopyInvite}
+                      className="flex-1 bg-teal text-white text-sm font-semibold rounded-xl py-3"
+                    >
+                      Copier le lien
+                    </button>
+                    <button
+                      onClick={handleNewInvite}
+                      disabled={generatingInvite}
+                      className="flex-1 bg-white border border-teal-light text-teal text-sm font-semibold rounded-xl py-3 disabled:opacity-50"
+                    >
+                      {generatingInvite ? '…' : 'Nouveau code'}
+                    </button>
+                  </div>
+                </>
+              ) : (
                 <button
                   onClick={handleNewInvite}
                   disabled={generatingInvite}
-                  className="flex-1 bg-white border border-teal-light text-teal text-sm font-semibold rounded-xl py-3 disabled:opacity-50"
+                  className="w-full bg-teal text-white font-semibold rounded-card py-3 disabled:opacity-50"
                 >
-                  {generatingInvite ? '…' : 'Nouveau code'}
+                  {generatingInvite ? 'Génération…' : "Générer un code d'invitation"}
                 </button>
-              </div>
-            </>
-          ) : (
-            <button
-              onClick={handleNewInvite}
-              disabled={generatingInvite}
-              className="w-full bg-teal text-white font-semibold rounded-card py-3 disabled:opacity-50"
-            >
-              {generatingInvite ? 'Génération…' : "Générer un code d'invitation"}
-            </button>
-          )}
-          {inviteMsg && <p className="text-xs text-teal text-center mt-2">{inviteMsg}</p>}
-        </section>
-      )}
+              )}
+              {inviteMsg && <p className="text-xs text-teal text-center mt-2">{inviteMsg}</p>}
+            </div>
+
+            <div className="pt-3 border-t border-teal-light">
+              <button
+                onClick={handleLeave}
+                disabled={leaving}
+                className="text-coral text-sm font-medium disabled:opacity-50"
+              >
+                {leaving ? 'Départ…' : 'Quitter ce foyer'}
+              </button>
+              {leaveError && <p className="text-coral text-xs mt-1">{leaveError}</p>}
+            </div>
+          </div>
+        )}
+      </section>
 
       {householdView ? (
         <section className="bg-teal text-white rounded-card p-6 shadow-sm space-y-3">

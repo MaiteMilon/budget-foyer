@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react';
-import { getHouseholdPockets, deletePocket, addPocket, updatePocket, correctPocketBalance, getMonthSavingsGoals, getMonthExpenses } from '../lib/data.js';
+import { getHouseholdPockets, deletePocket, addPocket, updatePocket, correctPocketBalance, swapPocketOrder, getMonthSavingsGoals, getMonthExpenses } from '../lib/data.js';
 import { recordPocketTransfer } from '../lib/transfers.js';
 import { computeGoalProgress } from '../lib/budget-engine.js';
 import { useApp } from '../context/AppContext.jsx';
 import QuickAddPocketForm, { POCKET_KINDS } from '../components/QuickAddPocketForm.jsx';
+import { getMyRecurringGoals, upsertRecurringGoal } from '../lib/savingsGoalTemplates.js';
 
 export default function Epargne() {
   const { profile, currentBudgetMonth, refresh } = useApp();
   const [pockets, setPockets] = useState([]);
   const [goalsByPocket, setGoalsByPocket] = useState(new Map());
+  const [recurringGoalsByPocket, setRecurringGoalsByPocket] = useState(new Map());
   const [spentByPocket, setSpentByPocket] = useState(new Map());
   const [loading, setLoading] = useState(true);
   const [showAddPocket, setShowAddPocket] = useState(false);
@@ -22,13 +24,15 @@ export default function Epargne() {
     setLoading(true);
     setLoadError(null);
     try {
-      const [pocketsList, goals, expenses] = await Promise.all([
+      const [pocketsList, goals, expenses, myRecurringGoals] = await Promise.all([
         getHouseholdPockets(profile.household_id),
         getMonthSavingsGoals(currentBudgetMonth.id),
         getMonthExpenses(currentBudgetMonth.id, profile.id),
+        getMyRecurringGoals(profile.id),
       ]);
       setPockets(pocketsList);
       setGoalsByPocket(new Map(goals.map((g) => [g.pocket_id, g])));
+      setRecurringGoalsByPocket(myRecurringGoals);
 
       const spentMap = new Map();
       expenses.forEach((e) => {
@@ -52,15 +56,23 @@ export default function Epargne() {
     await load();
   }
 
-  function openEdit(pocket) {
-    setShowAddPocket(false);
-    setEditingPocket(pocket);
+  async function handleMove(list, index, direction) {
+    const otherIndex = direction === 'up' ? index - 1 : index + 1;
+    if (otherIndex < 0 || otherIndex >= list.length) return;
+    await swapPocketOrder(list[index], list[otherIndex]);
+    await load();
   }
 
-  async function handleAddPocket({ name, kind, usageType, isPrivate, targetAmount, targetDate }) {
+  function openEdit(pocket) {
+    setShowAddPocket(false);
+    const template = recurringGoalsByPocket.get(pocket.id);
+    setEditingPocket({ ...pocket, monthlyAmount: template?.default_amount ?? null });
+  }
+
+  async function handleAddPocket({ name, kind, usageType, isPrivate, targetAmount, targetDate, monthlyAmount }) {
     setError('');
     try {
-      await addPocket({
+      const pocket = await addPocket({
         household_id: profile.household_id,
         owner_id: isPrivate ? profile.id : null,
         name,
@@ -72,6 +84,15 @@ export default function Epargne() {
         target_date: targetDate,
         balance: 0,
       });
+      if (monthlyAmount) {
+        await upsertRecurringGoal({
+          householdId: profile.household_id,
+          userId: profile.id,
+          pocketId: pocket.id,
+          defaultAmount: monthlyAmount,
+          isActive: true,
+        });
+      }
       setShowAddPocket(false);
       await load();
     } catch (err) {
@@ -79,7 +100,7 @@ export default function Epargne() {
     }
   }
 
-  async function handleUpdatePocket({ name, kind, usageType, isPrivate, targetAmount, targetDate }) {
+  async function handleUpdatePocket({ name, kind, usageType, isPrivate, targetAmount, targetDate, monthlyAmount }) {
     setError('');
     try {
       await updatePocket(editingPocket.id, {
@@ -92,6 +113,15 @@ export default function Epargne() {
         target_amount: targetAmount,
         target_date: targetDate,
       });
+      if (monthlyAmount) {
+        await upsertRecurringGoal({
+          householdId: profile.household_id,
+          userId: profile.id,
+          pocketId: editingPocket.id,
+          defaultAmount: monthlyAmount,
+          isActive: true,
+        });
+      }
       setEditingPocket(null);
       await load();
       await refresh();
@@ -169,7 +199,7 @@ export default function Epargne() {
       <section>
         <h2 className="font-semibold mb-3">Comptes de dépense</h2>
         <ul className="space-y-3">
-          {depenseAccounts.map((p) => {
+          {depenseAccounts.map((p, index) => {
             const spentThisMonth = spentByPocket.get(p.id) || 0;
             const hasEnvelope = p.target_amount && Number(p.target_amount) > 0;
             const remaining = hasEnvelope ? Number(p.target_amount) - spentThisMonth : null;
@@ -178,7 +208,11 @@ export default function Epargne() {
             return (
               <li key={p.id} className="bg-white rounded-card p-4 shadow-sm">
                 <div className="flex justify-between items-center">
-                  <span className="font-medium">
+                  <span className="font-medium flex items-center gap-1">
+                    <span className="flex flex-col -my-1 mr-1 text-ink/30 text-xs leading-none">
+                      <button onClick={() => handleMove(depenseAccounts, index, 'up')} disabled={index === 0} className="disabled:opacity-20" aria-label="Monter">▲</button>
+                      <button onClick={() => handleMove(depenseAccounts, index, 'down')} disabled={index === depenseAccounts.length - 1} className="disabled:opacity-20" aria-label="Descendre">▼</button>
+                    </span>
                     {p.icon} {p.name}
                     {p.is_private && <span className="text-ink/30 text-xs"> · privé</span>}
                   </span>
@@ -237,7 +271,7 @@ export default function Epargne() {
       <section>
         <h2 className="font-semibold mb-3">Notre épargne</h2>
         <ul className="space-y-3">
-          {epargneAccounts.map((p) => {
+          {epargneAccounts.map((p, index) => {
             const goal = goalsByPocket.get(p.id);
             const monthlyProgress = goal
               ? computeGoalProgress({ plannedAmount: goal.planned_amount, actualPaidIn: goal.actual_paid_in })
@@ -250,7 +284,11 @@ export default function Epargne() {
             return (
               <li key={p.id} className="bg-white rounded-card p-4 shadow-sm">
                 <div className="flex justify-between items-center">
-                  <span className="font-medium">
+                  <span className="font-medium flex items-center gap-1">
+                    <span className="flex flex-col -my-1 mr-1 text-ink/30 text-xs leading-none">
+                      <button onClick={() => handleMove(epargneAccounts, index, 'up')} disabled={index === 0} className="disabled:opacity-20" aria-label="Monter">▲</button>
+                      <button onClick={() => handleMove(epargneAccounts, index, 'down')} disabled={index === epargneAccounts.length - 1} className="disabled:opacity-20" aria-label="Descendre">▼</button>
+                    </span>
                     {p.icon} {p.name}
                     {p.is_private && <span className="text-ink/30 text-xs"> · privé</span>}
                   </span>

@@ -156,17 +156,57 @@ export async function saveMonthPreparation({
     if (insChargesError) throw insChargesError;
   }
 
-  // 3. Objectifs d'épargne : upsert par poche (clé unique budget_month_id + pocket_id).
-  if (savingsGoals.length > 0) {
+  // 3. Objectifs d'épargne : le gabarit (montant habituel) est toujours
+  // tenu à jour avec le dernier montant saisi, actif ou non — c'est ce
+  // qui permet de suspendre un mois précis ("pas ce mois-ci") sans
+  // jamais perdre le montant habituel pour la prochaine fois. Seuls les
+  // objectifs ACTIFS ce mois-ci obtiennent une ligne dans savings_goals
+  // (sinon ils ne compteraient pas dans le budget disponible).
+  const activeGoals = [];
+  const inactivePocketIds = [];
+  for (const goal of savingsGoals) {
+    const { data: template, error: templateError } = await supabase
+      .from('recurring_savings_goals')
+      .upsert(
+        {
+          household_id: householdId,
+          owner_id: userId,
+          pocket_id: goal.pocketId,
+          default_amount: goal.plannedAmount,
+          is_active: goal.isActive,
+        },
+        { onConflict: 'owner_id,pocket_id' }
+      )
+      .select()
+      .single();
+    if (templateError) throw templateError;
+
+    if (goal.isActive) {
+      activeGoals.push({ pocketId: goal.pocketId, plannedAmount: goal.plannedAmount, recurringGoalId: template.id });
+    } else {
+      inactivePocketIds.push(goal.pocketId);
+    }
+  }
+
+  if (activeGoals.length > 0) {
     const { error: goalsError } = await supabase.from('savings_goals').upsert(
-      savingsGoals.map((g) => ({
+      activeGoals.map((g) => ({
         budget_month_id: budgetMonthId,
         pocket_id: g.pocketId,
         planned_amount: g.plannedAmount,
+        recurring_goal_id: g.recurringGoalId,
       })),
       { onConflict: 'budget_month_id,pocket_id' }
     );
     if (goalsError) throw goalsError;
+  }
+  if (inactivePocketIds.length > 0) {
+    const { error: delGoalsError } = await supabase
+      .from('savings_goals')
+      .delete()
+      .eq('budget_month_id', budgetMonthId)
+      .in('pocket_id', inactivePocketIds);
+    if (delGoalsError) throw delGoalsError;
   }
 
   // 4. Marge de sécurité + démarrage du mois.

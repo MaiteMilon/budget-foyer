@@ -389,14 +389,67 @@ consultable/modifiable dans **Revenus**, proposé chaque mois suivant sans
 ressaisie. Non cochée, il reste ponctuel : ajouté une seule fois à ce
 mois, sans suite.
 
-## 20. Prochaines étapes (par ordre de priorité proposé)
+## 20. Objectifs du mois combinés + ordre des comptes
+
+- **"Objectifs du mois" sur l'Accueil** : pour un compte **commun**
+  (compte joint, tirelire...), l'objectif et le "versé" combinent
+  désormais les deux membres (500 € + 500 € = 1000 €), avec le détail
+  "X € versés par Maïté / Y € versés par Stephane" et le **solde réel du
+  compte** affiché juste en dessous, sans changer d'onglet. Pour un
+  compte privé, inchangé — seulement votre propre objectif.
+- **Ordre des comptes personnalisable** : flèches ▲▼ sur chaque compte,
+  dans Épargne (comptes de dépense et épargne séparément). Nouvelle
+  colonne `sort_order` sur `savings_pockets`. Limite à connaître : cet
+  ordre est stocké sur le compte lui-même, donc partagé — le réorganiser
+  change l'ordre pour les deux membres, pas seulement le vôtre.
+
+## 21. Verser depuis l'Accueil, quitter le foyer, et gabarit d'épargne
+
+- **"+ Verser" directement sur "Objectifs du mois"** (Accueil) — plus
+  besoin d'aller sur Épargne pour enregistrer un versement.
+- **Foyer** : le code d'invitation reste accessible en permanence dans
+  une section repliable "Gérer mon foyer" (plus besoin d'avoir un
+  foyer incomplet pour le voir — utile pour réinviter quelqu'un
+  d'autre). Un lien "Quitter ce foyer" y a été ajouté, avec
+  confirmation (nouvelle fonction RPC `leave_household()`, même
+  principe sécurisé que `create_household`/`accept_household_invite`).
+- **Gabarit de versement d'épargne habituel** (nouvelle table
+  `recurring_savings_goals`, une par personne et par compte — même
+  principe que les charges/revenus fixes) : le montant qu'on verse
+  d'habitude est désormais mémorisé séparément du mois en cours. Chaque
+  ligne d'"Ce que je prévois de mettre de côté" (Préparer mon mois) a
+  une case **"Actif ce mois-ci"** — décochée, le montant ne compte plus
+  dans le budget disponible de ce mois précis, mais reste enregistré
+  pour être proposé de nouveau le mois où le versement redevient
+  possible. Résout le cas "pas de salaire ce mois-ci, donc pas
+  d'épargne, mais je ne veux pas perdre mon montant habituel".
+
+## 22. Préparer mon mois en cartes repliables + montant mensuel dès la création du compte
+
+- **Préparer mon mois** ne s'ouvre plus tout déroulé — les quatre
+  sections (Revenus, Charges, Ce que je prévois de mettre de côté,
+  Marge) sont désormais des cartes repliées par défaut, avec leur total
+  affiché dans l'en-tête ; on clique pour déplier uniquement celle
+  qu'on veut modifier. Beaucoup moins de défilement.
+- **Créer/modifier un compte d'épargne** (Épargne, ou directement depuis
+  Préparer mon mois) propose maintenant un champ **"Montant que je
+  compte mettre chaque mois"** dès la création — plus besoin d'aller
+  ensuite sur Préparer mon mois pour le renseigner une première fois ;
+  ça crée directement le gabarit (`recurring_savings_goals`).
+- Rappel sur les charges déjà payées avant d'être ajoutées à l'app
+  (ex. assurances prélevées avant leur saisie) : les laisser **inactives**
+  tant qu'on ne veut pas qu'elles comptent sur le mois affiché — cocher
+  "Active" sur l'écran Charges au moment voulu (ex. le mois suivant)
+  pour qu'elles recommencent à se réserver, sans rien resaisir.
+
+## 23. Prochaines étapes (par ordre de priorité proposé)
 
 1. **Notifications** (§16) : Web Push via le service worker déjà généré
    par `vite-plugin-pwa`, déclenchées par des fonctions Supabase Edge sur
    les seuils (50 % du budget, délai de réflexion terminé, etc.).
 2. **Export CSV/PDF** (§20).
 
-## 21. Pour tester à deux dès maintenant
+## 24. Pour tester à deux dès maintenant
 
 1. Créer un projet Supabase, exécuter `supabase/schema.sql` dans son
    éditeur SQL, renseigner `.env` (voir §5).

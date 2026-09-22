@@ -18,6 +18,7 @@ import {
   saveMonthPreparation,
 } from '../lib/month-prep.js';
 import { getActiveRecurringIncomes } from '../lib/income.js';
+import { getMyRecurringGoals } from '../lib/savingsGoalTemplates.js';
 
 const INCOME_KINDS = [
   { id: 'salaire', label: 'Salaire' },
@@ -55,6 +56,11 @@ export default function PrepareMonth() {
   const [safetyMargin, setSafetyMargin] = useState('0');
 
   const [showAddPocket, setShowAddPocket] = useState(false);
+  const [openSection, setOpenSection] = useState(null); // null | 'revenus' | 'charges' | 'epargne' | 'marge'
+
+  function toggleSection(name) {
+    setOpenSection((prev) => (prev === name ? null : name));
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -93,6 +99,7 @@ export default function PrepareMonth() {
           : [];
       const recurringIncomeTemplates =
         existingIncomes.length === 0 ? await getActiveRecurringIncomes(profile.id) : [];
+      const recurringGoalsByPocket = await getMyRecurringGoals(profile.id);
 
       if (cancelled) return;
 
@@ -158,16 +165,33 @@ export default function PrepareMonth() {
       }
 
       const existingGoalByPocket = new Map(existingGoals.map((g) => [g.pocket_id, g.planned_amount]));
+      const monthAlreadyPrepared = existingGoals.length > 0 || existingIncomes.length > 0 || existingCharges.length > 0;
       setGoals(
         householdPockets
           .filter((p) => p.usage_type !== 'depense') // un compte "dépense" n'a pas de réservation mensuelle
-          .map((p) => ({
-            pocketId: p.id,
-            pocket: p,
-            plannedAmount: String(
-              existingGoalByPocket.get(p.id) ?? prevGoalsByPocket.get(p.id) ?? 0
-            ),
-          }))
+          .map((p) => {
+            const template = recurringGoalsByPocket.get(p.id);
+            if (existingGoalByPocket.has(p.id)) {
+              // Actif ce mois-ci : une ligne existe déjà.
+              return { pocketId: p.id, pocket: p, plannedAmount: String(existingGoalByPocket.get(p.id)), isActive: true };
+            }
+            if (monthAlreadyPrepared) {
+              // Ce mois a déjà été préparé, mais ce compte a été désactivé
+              // ("pas ce mois-ci") — on garde le montant habituel visible,
+              // juste décoché.
+              return {
+                pocketId: p.id, pocket: p,
+                plannedAmount: String(template?.default_amount ?? prevGoalsByPocket.get(p.id) ?? 0),
+                isActive: false,
+              };
+            }
+            // Mois jamais préparé : on part du gabarit (montant + actif).
+            return {
+              pocketId: p.id, pocket: p,
+              plannedAmount: String(template?.default_amount ?? prevGoalsByPocket.get(p.id) ?? 0),
+              isActive: template ? template.is_active : true,
+            };
+          })
       );
 
       setLoading(false);
@@ -188,7 +212,7 @@ export default function PrepareMonth() {
     return computeMonthlyBudget({
       safetyMargin: Number(String(safetyMargin).replace(',', '.')) || 0,
       incomes: incomes.map((i) => ({ amount: Number(String(i.amount).replace(',', '.')) || 0 })),
-      savingsGoals: goals.map((g) => ({ plannedAmount: Number(String(g.plannedAmount).replace(',', '.')) || 0 })),
+      savingsGoals: goals.filter((g) => g.isActive).map((g) => ({ plannedAmount: Number(String(g.plannedAmount).replace(',', '.')) || 0 })),
       fixedCharges: charges.map((c) => ({ amount: Number(String(c.amount).replace(',', '.')) || 0 })),
       expenses: [],
     });
@@ -217,8 +241,8 @@ export default function PrepareMonth() {
     setCharges((prev) => prev.filter((c) => c.id !== id));
   }
 
-  function updateGoal(pocketId, plannedAmount) {
-    setGoals((prev) => prev.map((g) => (g.pocketId === pocketId ? { ...g, plannedAmount } : g)));
+  function updateGoal(pocketId, patch) {
+    setGoals((prev) => prev.map((g) => (g.pocketId === pocketId ? { ...g, ...patch } : g)));
   }
 
   async function handleQuickAddPocket(formData) {
@@ -237,7 +261,11 @@ export default function PrepareMonth() {
     setPockets((prev) => [...prev, pocket]);
     // Un compte "dépense" n'apparaît pas dans les objectifs du mois (pas de réservation).
     if (formData.usageType !== 'depense') {
-      setGoals((prev) => [...prev, { pocketId: pocket.id, pocket, plannedAmount: '0' }]);
+      setGoals((prev) => [...prev, {
+        pocketId: pocket.id, pocket,
+        plannedAmount: formData.monthlyAmount ? String(formData.monthlyAmount) : '0',
+        isActive: true,
+      }]);
     }
     setShowAddPocket(false);
   }
@@ -269,6 +297,7 @@ export default function PrepareMonth() {
         savingsGoals: goals.map((g) => ({
           pocketId: g.pocketId,
           plannedAmount: Number(String(g.plannedAmount).replace(',', '.')) || 0,
+          isActive: g.isActive,
         })),
         markStarted: true,
       });
@@ -311,8 +340,15 @@ export default function PrepareMonth() {
       </section>
 
       <section className="bg-white rounded-card p-5 shadow-sm">
-        <h2 className="font-semibold mb-3">Mes revenus</h2>
-        <div className="space-y-3">
+        <button onClick={() => toggleSection('revenus')} className="w-full flex justify-between items-center">
+          <h2 className="font-semibold">Mes revenus</h2>
+          <span className="flex items-center gap-2 text-sm text-ink/60">
+            {liveBudget.totalIncome.toLocaleString('fr-FR')} €
+            <span className="text-ink/40 text-xs">{openSection === 'revenus' ? '▲' : '▼'}</span>
+          </span>
+        </button>
+        {openSection === 'revenus' && (
+        <div className="space-y-3 mt-3 pt-3 border-t border-teal-light">
           {incomes.map((income) => (
             <div key={income.id} className="border border-teal-light rounded-2xl p-3 space-y-2">
               <div className="flex gap-2 items-center">
@@ -351,14 +387,24 @@ export default function PrepareMonth() {
             </div>
           ))}
         </div>
+        )}
+        {openSection === 'revenus' && (
         <button onClick={addIncomeRow} className="mt-3 text-teal text-sm font-medium">
           + Ajouter un revenu
         </button>
+        )}
       </section>
 
       <section className="bg-white rounded-card p-5 shadow-sm">
-        <h2 className="font-semibold mb-3">Charges fixes et ponctuelles</h2>
-        <div className="space-y-3">
+        <button onClick={() => toggleSection('charges')} className="w-full flex justify-between items-center">
+          <h2 className="font-semibold">Charges fixes et ponctuelles</h2>
+          <span className="flex items-center gap-2 text-sm text-ink/60">
+            {liveBudget.totalFixedCharges.toLocaleString('fr-FR')} €
+            <span className="text-ink/40 text-xs">{openSection === 'charges' ? '▲' : '▼'}</span>
+          </span>
+        </button>
+        {openSection === 'charges' && (
+        <div className="space-y-3 mt-3 pt-3 border-t border-teal-light">
           {charges.map((charge) => (
             <div key={charge.id} className="border border-teal-light rounded-2xl p-3 space-y-2">
               <div className="flex gap-2">
@@ -407,32 +453,53 @@ export default function PrepareMonth() {
             </div>
           ))}
         </div>
+        )}
+        {openSection === 'charges' && (
         <button onClick={addChargeRow} className="mt-3 text-teal text-sm font-medium">
           + Ajouter une charge
         </button>
+        )}
       </section>
 
       <section className="bg-white rounded-card p-5 shadow-sm">
-        <h2 className="font-semibold mb-3">Ce que je prévois de mettre de côté</h2>
+        <button onClick={() => toggleSection('epargne')} className="w-full flex justify-between items-center">
+          <h2 className="font-semibold">Ce que je prévois de mettre de côté</h2>
+          <span className="flex items-center gap-2 text-sm text-ink/60">
+            {liveBudget.totalPlannedSavings.toLocaleString('fr-FR')} €
+            <span className="text-ink/40 text-xs">{openSection === 'epargne' ? '▲' : '▼'}</span>
+          </span>
+        </button>
+        {openSection === 'epargne' && (
+        <>
         {goals.length === 0 && !showAddPocket && (
-          <p className="text-sm text-ink/40 mb-3">Aucun compte pour l'instant.</p>
+          <p className="text-sm text-ink/40 mt-3 pt-3 border-t border-teal-light">Aucun compte pour l'instant.</p>
         )}
-        <div className="space-y-3">
+        <div className="space-y-3 mt-3 pt-3 border-t border-teal-light">
           {goals.map((g) => (
-            <div key={g.pocketId} className="flex justify-between items-center gap-3">
-              <span className="text-sm font-medium">
-                {g.pocket.icon} {g.pocket.name}
-                {g.pocket.is_private && <span className="text-ink/30"> · privée</span>}
-              </span>
-              <div className="relative w-28 shrink-0">
-                <input
-                  inputMode="decimal"
-                  value={g.plannedAmount}
-                  onChange={(e) => updateGoal(g.pocketId, e.target.value)}
-                  className="w-full bg-cream rounded-xl px-3 py-2 pr-6 border border-teal-light text-sm text-right"
-                />
-                <span className="absolute right-2 top-1/2 -translate-y-1/2 text-ink/40 text-xs">€</span>
+            <div key={g.pocketId} className="border border-teal-light rounded-2xl p-3 space-y-2">
+              <div className="flex justify-between items-center gap-3">
+                <span className="text-sm font-medium">
+                  {g.pocket.icon} {g.pocket.name}
+                  {g.pocket.is_private && <span className="text-ink/30"> · privée</span>}
+                </span>
+                <div className="relative w-28 shrink-0">
+                  <input
+                    inputMode="decimal"
+                    value={g.plannedAmount}
+                    onChange={(e) => updateGoal(g.pocketId, { plannedAmount: e.target.value })}
+                    className="w-full bg-cream rounded-xl px-3 py-2 pr-6 border border-teal-light text-sm text-right"
+                  />
+                  <span className="absolute right-2 top-1/2 -translate-y-1/2 text-ink/40 text-xs">€</span>
+                </div>
               </div>
+              <label className="flex items-center gap-1.5 text-xs text-ink/60">
+                <input
+                  type="checkbox"
+                  checked={g.isActive}
+                  onChange={(e) => updateGoal(g.pocketId, { isActive: e.target.checked })}
+                />
+                Actif ce mois-ci (décochez si vous ne pourrez pas verser ce montant habituel ce mois-ci — le montant reste enregistré pour la prochaine fois)
+              </label>
             </div>
           ))}
         </div>
@@ -444,20 +511,32 @@ export default function PrepareMonth() {
             + Ajouter un compte
           </button>
         )}
+        </>
+        )}
       </section>
 
       <section className="bg-white rounded-card p-5 shadow-sm">
-        <h2 className="font-semibold mb-2">Marge de sécurité</h2>
-        <p className="text-xs text-ink/50 mb-2">Un montant que vous préférez ne pas toucher, par précaution.</p>
-        <div className="relative w-32">
-          <input
-            inputMode="decimal"
-            value={safetyMargin}
-            onChange={(e) => setSafetyMargin(e.target.value)}
-            className="w-full bg-cream rounded-xl px-3 py-2 pr-6 border border-teal-light text-sm text-right"
-          />
-          <span className="absolute right-2 top-1/2 -translate-y-1/2 text-ink/40 text-xs">€</span>
+        <button onClick={() => toggleSection('marge')} className="w-full flex justify-between items-center">
+          <h2 className="font-semibold">Marge de sécurité</h2>
+          <span className="flex items-center gap-2 text-sm text-ink/60">
+            {(Number(String(safetyMargin).replace(',', '.')) || 0).toLocaleString('fr-FR')} €
+            <span className="text-ink/40 text-xs">{openSection === 'marge' ? '▲' : '▼'}</span>
+          </span>
+        </button>
+        {openSection === 'marge' && (
+        <div className="mt-3 pt-3 border-t border-teal-light">
+          <p className="text-xs text-ink/50 mb-2">Un montant que vous préférez ne pas toucher, par précaution.</p>
+          <div className="relative w-32">
+            <input
+              inputMode="decimal"
+              value={safetyMargin}
+              onChange={(e) => setSafetyMargin(e.target.value)}
+              className="w-full bg-cream rounded-xl px-3 py-2 pr-6 border border-teal-light text-sm text-right"
+            />
+            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-ink/40 text-xs">€</span>
+          </div>
         </div>
+        )}
       </section>
 
       {error && <p className="text-coral text-sm text-center">{error}</p>}

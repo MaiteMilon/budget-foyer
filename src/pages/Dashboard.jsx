@@ -13,6 +13,7 @@ import {
 } from '../lib/data.js';
 import { loadMemberBudget } from '../lib/memberBudget.js';
 import { getHouseholdProjects, createProject, contributeToProject } from '../lib/projects.js';
+import { recordPocketTransfer } from '../lib/transfers.js';
 
 export default function Dashboard() {
   const { profile, currentBudgetMonth, refresh } = useApp();
@@ -24,80 +25,97 @@ export default function Dashboard() {
   const [spentByPocket, setSpentByPocket] = useState(new Map());
   const [projects, setProjects] = useState([]);
   const [nextMonthToPrep, setNextMonthToPrep] = useState(null); // '2026-10-01' si à préparer, sinon null
+  const [transferringGoalId, setTransferringGoalId] = useState(null);
+  const [goalError, setGoalError] = useState('');
+
+  async function handleGoalTransfer(pocket, amount) {
+    setGoalError('');
+    try {
+      await recordPocketTransfer({
+        householdId: profile.household_id,
+        userId: profile.id,
+        budgetMonthId: currentBudgetMonth.id,
+        pocket,
+        amount,
+      });
+      setTransferringGoalId(null);
+      await load();
+      await refresh();
+    } catch (err) {
+      setGoalError(err.message);
+    }
+  }
 
   async function loadProjects() {
     const data = await getHouseholdProjects(profile.household_id);
     setProjects(data);
   }
 
-  useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      if (!currentBudgetMonth) return;
-      setLoading(true);
-      setLoadError(null);
-      try {
-        const [members, expenses, pockets, projectsList] = await Promise.all([
-          getHouseholdMembers(profile.household_id),
-          getMonthExpenses(currentBudgetMonth.id, profile.id),
-          getHouseholdPockets(profile.household_id),
-          getHouseholdProjects(profile.household_id),
-        ]);
-        if (cancelled) return;
+  async function load() {
+    if (!currentBudgetMonth) return;
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const [members, expenses, pockets, projectsList] = await Promise.all([
+        getHouseholdMembers(profile.household_id),
+        getMonthExpenses(currentBudgetMonth.id, profile.id),
+        getHouseholdPockets(profile.household_id),
+        getHouseholdProjects(profile.household_id),
+      ]);
 
-        const budgets = await Promise.all(
-          members.map((m) => loadMemberBudget(m, currentBudgetMonth.month))
-        );
-        if (cancelled) return;
-        setMemberBudgets(budgets);
+      const budgets = await Promise.all(
+        members.map((m) => loadMemberBudget(m, currentBudgetMonth.month))
+      );
+      setMemberBudgets(budgets);
 
-        // Objectifs du mois : pour un compte COMMUN, on combine l'objectif
-        // et le "versé" des deux membres (chacun a son propre objectif
-        // stocké dans son propre mois budgétaire) — avec le détail par
-        // personne. Pour un compte privé, uniquement le sien.
-        const goalsByMember = await Promise.all(
-          members.map(async (m) => {
-            const month = await getBudgetMonthForUser(m.id, currentBudgetMonth.month);
-            if (!month) return { member: m, goals: [] };
-            const goals = await getMonthSavingsGoals(month.id);
-            return { member: m, goals };
-          })
-        );
-        if (cancelled) return;
+      // Objectifs du mois : pour un compte COMMUN, on combine l'objectif
+      // et le "versé" des deux membres (chacun a son propre objectif
+      // stocké dans son propre mois budgétaire) — avec le détail par
+      // personne. Pour un compte privé, uniquement le sien.
+      const goalsByMember = await Promise.all(
+        members.map(async (m) => {
+          const month = await getBudgetMonthForUser(m.id, currentBudgetMonth.month);
+          if (!month) return { member: m, goals: [] };
+          const goals = await getMonthSavingsGoals(month.id);
+          return { member: m, goals };
+        })
+      );
 
-        const combined = pockets
-          .filter((p) => p.usage_type !== 'depense')
-          .map((p) => {
-            const perMember = goalsByMember
-              .filter(({ member }) => !p.is_private || member.id === profile.id)
-              .map(({ member, goals }) => {
-                const g = goals.find((g) => g.pocket_id === p.id);
-                return { member, planned: Number(g?.planned_amount) || 0, paid: Number(g?.actual_paid_in) || 0 };
-              });
-            const totalPlanned = perMember.reduce((s, x) => s + x.planned, 0);
-            const totalPaid = perMember.reduce((s, x) => s + x.paid, 0);
-            return { pocket: p, totalPlanned, totalPaid, perMember };
-          })
-          .filter((g) => g.totalPlanned > 0);
-        setCombinedGoals(combined);
+      const combined = pockets
+        .filter((p) => p.usage_type !== 'depense')
+        .map((p) => {
+          const perMember = goalsByMember
+            .filter(({ member }) => !p.is_private || member.id === profile.id)
+            .map(({ member, goals }) => {
+              const g = goals.find((g) => g.pocket_id === p.id);
+              return { member, planned: Number(g?.planned_amount) || 0, paid: Number(g?.actual_paid_in) || 0 };
+            });
+          const totalPlanned = perMember.reduce((s, x) => s + x.planned, 0);
+          const totalPaid = perMember.reduce((s, x) => s + x.paid, 0);
+          return { pocket: p, totalPlanned, totalPaid, perMember };
+        })
+        .filter((g) => g.totalPlanned > 0);
+      setCombinedGoals(combined);
 
-        setDepenseAccounts(pockets.filter((p) => p.usage_type === 'depense'));
-        setProjects(projectsList);
+      setDepenseAccounts(pockets.filter((p) => p.usage_type === 'depense'));
+      setProjects(projectsList);
 
-        const spentMap = new Map();
-        expenses.forEach((e) => {
-          if (!e.source_pocket_id) return;
-          spentMap.set(e.source_pocket_id, (spentMap.get(e.source_pocket_id) || 0) + Number(e.amount));
-        });
-        setSpentByPocket(spentMap);
-      } catch (err) {
-        if (!cancelled) setLoadError(err.message || String(err));
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
+      const spentMap = new Map();
+      expenses.forEach((e) => {
+        if (!e.source_pocket_id) return;
+        spentMap.set(e.source_pocket_id, (spentMap.get(e.source_pocket_id) || 0) + Number(e.amount));
+      });
+      setSpentByPocket(spentMap);
+    } catch (err) {
+      setLoadError(err.message || String(err));
+    } finally {
+      setLoading(false);
     }
+  }
+
+  useEffect(() => {
     load();
-    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentBudgetMonth, profile]);
 
   // Bannière "Préparer [mois suivant]" : seulement dans les derniers jours
@@ -302,10 +320,20 @@ export default function Dashboard() {
                     ))}
                   </ul>
                 )}
+                <button
+                  onClick={() => setTransferringGoalId(transferringGoalId === pocket.id ? null : pocket.id)}
+                  className="text-teal text-xs font-semibold mt-1"
+                >
+                  {transferringGoalId === pocket.id ? 'Annuler' : '+ Verser'}
+                </button>
+                {transferringGoalId === pocket.id && (
+                  <ContributeForm onSubmit={(amount) => handleGoalTransfer(pocket, amount)} />
+                )}
               </li>
             );
           })}
         </ul>
+        {goalError && <p className="text-coral text-xs text-center mt-2">{goalError}</p>}
       </section>
 
       <ProjectsCard profile={profile} projects={projects} onChanged={loadProjects} />
