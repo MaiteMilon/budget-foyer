@@ -114,12 +114,17 @@ export default function Foyer() {
 
   if (loading) return <p className="text-center text-ink/50 mt-20">Chargement…</p>;
 
+  // "Notre foyer" est la vue COMMUNE : un compte privé n'y apparaît
+  // jamais, même le sien propre — c'est justement ce que "privé" veut
+  // dire, y compris dans les totaux affichés ici.
+  const sharedPockets = pockets.filter((p) => !p.is_private);
+
   const prepared = memberBudgets.filter((b) => b.budget);
   const householdView =
     prepared.length === 2
-      ? computeHouseholdView(prepared[0].budget, prepared[1].budget, pockets)
+      ? computeHouseholdView(prepared[0].budget, prepared[1].budget, sharedPockets)
       : null;
-  const totalSavingsBalance = pockets.reduce((sum, p) => sum + Number(p.balance), 0);
+  const totalSavingsBalance = sharedPockets.reduce((sum, p) => sum + Number(p.balance), 0);
 
   return (
     <div className="space-y-5">
@@ -222,13 +227,13 @@ export default function Foyer() {
       <section className="bg-white rounded-card p-5 shadow-sm">
         <h2 className="font-semibold mb-3">Nos comptes</h2>
         <ul className="space-y-2">
-          {pockets.map((p) => (
+          {sharedPockets.map((p) => (
             <li key={p.id} className="flex justify-between text-sm">
               <span>{p.icon} {p.name}</span>
               <span className="font-medium">{Number(p.balance).toLocaleString('fr-FR')} €</span>
             </li>
           ))}
-          {pockets.length === 0 && <p className="text-sm text-ink/40">Aucun compte pour l'instant.</p>}
+          {sharedPockets.length === 0 && <p className="text-sm text-ink/40">Aucun compte pour l'instant.</p>}
         </ul>
       </section>
 
