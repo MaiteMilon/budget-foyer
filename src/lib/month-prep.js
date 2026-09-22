@@ -56,6 +56,7 @@ export async function getRecurringChargeTemplates(householdId, userId) {
 export async function saveMonthPreparation({
   budgetMonthId,
   safetyMargin,
+  carryoverAmount,
   incomes,
   chargeEntries,
   savingsGoals,
@@ -210,7 +211,7 @@ export async function saveMonthPreparation({
   }
 
   // 4. Marge de sécurité + démarrage du mois.
-  const update = { safety_margin: safetyMargin };
+  const update = { safety_margin: safetyMargin, carryover_amount: carryoverAmount ?? 0 };
   if (markStarted) update.started_at = new Date().toISOString();
   const { data: month, error: monthError } = await supabase
     .from('budget_months')

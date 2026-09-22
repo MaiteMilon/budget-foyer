@@ -51,12 +51,17 @@ export function computeMonthlyBudget(input) {
   const totalPlannedSavings = sum(input.savingsGoals, (g) => g.plannedAmount);
   const totalFixedCharges = sum(input.fixedCharges, (c) => c.amount);
   const safetyMargin = Number(input.safetyMargin) || 0;
+  // Report du reste à dépenser du mois précédent (positif ou négatif) —
+  // suggéré automatiquement à la préparation du mois suivant, toujours
+  // modifiable ensuite (§ demande explicite "automatique mais modifiable").
+  const carryoverAmount = Number(input.carryoverAmount) || 0;
 
-  // Budget initial du mois = tout ce qui reste une fois le "prévu" réservé.
+  // Budget initial du mois = tout ce qui reste une fois le "prévu" réservé,
+  // plus le report éventuel du mois précédent.
   // Important : on utilise planned_amount (l'objectif), PAS actual_paid_in
   // (le réellement versé) — l'argent est bloqué dès l'intention (§3).
   const initialBudget =
-    totalIncome - totalPlannedSavings - totalFixedCharges - safetyMargin;
+    totalIncome - totalPlannedSavings - totalFixedCharges - safetyMargin + carryoverAmount;
 
   // Compte pour le budget "reste à dépenser" : le compte perso, ET tout
   // compte de type "dépense" (pas de réservation préalable — dépenser
@@ -79,6 +84,7 @@ export function computeMonthlyBudget(input) {
     totalPlannedSavings,
     totalFixedCharges,
     safetyMargin,
+    carryoverAmount,
     initialBudget,
     totalSpent,
     remaining,

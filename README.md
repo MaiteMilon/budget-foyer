@@ -442,14 +442,44 @@ mois, sans suite.
   "Active" sur l'écran Charges au moment voulu (ex. le mois suivant)
   pour qu'elles recommencent à se réserver, sans rien resaisir.
 
-## 23. Prochaines étapes (par ordre de priorité proposé)
+## 23. Report automatique (et modifiable) du mois précédent
+
+À la demande explicite de l'utilisatrice, après une longue discussion sur
+le fait que chaque mois était calculé de façon totalement indépendante
+(aucun lien entre le reste à dépenser de septembre et le budget
+d'octobre) : nouvelle colonne `carryover_amount` sur `budget_months`.
+
+- À la **première** préparation d'un nouveau mois (jamais fait avant),
+  l'app calcule automatiquement le vrai reste à dépenser final du mois
+  précédent (positif ou négatif) et le propose déjà rempli dans une
+  nouvelle carte repliable "Report du mois précédent" — juste au-dessus
+  de "Marge de sécurité" dans `PrepareMonth.jsx`.
+- **Toujours modifiable** ensuite, y compris pour le remettre à 0 si
+  l'utilisateur ne veut pas de report ce mois-là.
+- Une fois le mois déjà préparé, sa valeur enregistrée est respectée
+  telle quelle (jamais recalculée automatiquement à chaque réouverture),
+  pour ne pas écraser une correction manuelle.
+- `computeMonthlyBudget()` (`budget-engine.js`) prend maintenant un
+  paramètre `carryoverAmount`, ajouté à `initialBudget`. Répercuté
+  partout où le budget d'un mois est calculé : `memberBudget.js` (donc
+  Accueil et Foyer automatiquement), et affiché comme ligne à part dans
+  le tableau "Budget" de l'Accueil et dans le résumé en haut de
+  Préparer mon mois.
+- **Limite assumée, expliquée à l'utilisatrice** : l'app découpe
+  toujours le mois du 1ᵉʳ au dernier jour du calendrier, pas selon un
+  cycle de paie décalé (ex. salaire versé le 28). Le report absorbe
+  l'essentiel de cet écart d'un mois sur l'autre ; un vrai mois
+  "personnalisé" (ex. du 28 au 27, propre à chaque personne) a été
+  proposé mais refusé comme trop complexe — non construit.
+
+## 24. Prochaines étapes (par ordre de priorité proposé)
 
 1. **Notifications** (§16) : Web Push via le service worker déjà généré
    par `vite-plugin-pwa`, déclenchées par des fonctions Supabase Edge sur
    les seuils (50 % du budget, délai de réflexion terminé, etc.).
 2. **Export CSV/PDF** (§20).
 
-## 24. Pour tester à deux dès maintenant
+## 25. Pour tester à deux dès maintenant
 
 1. Créer un projet Supabase, exécuter `supabase/schema.sql` dans son
    éditeur SQL, renseigner `.env` (voir §5).

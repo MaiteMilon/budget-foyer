@@ -54,9 +54,10 @@ export default function PrepareMonth() {
   const [goals, setGoals] = useState([]); // [{pocketId, pocket, plannedAmount}]
   const [pockets, setPockets] = useState([]);
   const [safetyMargin, setSafetyMargin] = useState('0');
+  const [carryoverAmount, setCarryoverAmount] = useState('0');
 
   const [showAddPocket, setShowAddPocket] = useState(false);
-  const [openSection, setOpenSection] = useState(null); // null | 'revenus' | 'charges' | 'epargne' | 'marge'
+  const [openSection, setOpenSection] = useState(null); // null | 'revenus' | 'charges' | 'epargne' | 'marge' | 'report'
 
   function toggleSection(name) {
     setOpenSection((prev) => (prev === name ? null : name));
@@ -82,8 +83,11 @@ export default function PrepareMonth() {
           getPreviousBudgetMonth(profile.id, targetMonthISO),
         ]);
 
+      const monthAlreadyPrepared = existingGoals.length > 0 || existingIncomes.length > 0 || existingCharges.length > 0;
+
       let prevIncomes = [];
       let prevGoalsByPocket = new Map();
+      let suggestedCarryover = 0;
       if (previousMonth) {
         const [pIncomes, pGoals] = await Promise.all([
           getMonthIncomes(previousMonth.id),
@@ -91,7 +95,29 @@ export default function PrepareMonth() {
         ]);
         prevIncomes = pIncomes;
         pGoals.forEach((g) => prevGoalsByPocket.set(g.pocket_id, g.planned_amount));
+
+        // Report suggéré = le vrai reste à dépenser du mois précédent
+        // (§ demande : "automatique mais modifiable") — calculé uniquement
+        // la première fois qu'on prépare CE mois-ci ; une fois préparé,
+        // on respecte la valeur (éventuellement corrigée à la main) déjà
+        // enregistrée sur ce mois, sans la recalculer à chaque ouverture.
+        if (!monthAlreadyPrepared) {
+          const [pCharges, pExpenses] = await Promise.all([
+            getMonthFixedCharges(previousMonth.id),
+            getMonthExpenses(previousMonth.id, profile.id),
+          ]);
+          const prevBudget = computeMonthlyBudget({
+            safetyMargin: previousMonth.safety_margin,
+            carryoverAmount: previousMonth.carryover_amount,
+            incomes: pIncomes,
+            savingsGoals: pGoals.map((g) => ({ plannedAmount: g.planned_amount })),
+            fixedCharges: pCharges,
+            expenses: pExpenses.map((e) => ({ amount: e.amount, sourceType: e.source_type, pocketUsageType: e.source_pocket?.usage_type })),
+          });
+          suggestedCarryover = prevBudget.remaining;
+        }
       }
+      setCarryoverAmount(String(monthAlreadyPrepared ? (targetMonth.carryover_amount ?? 0) : suggestedCarryover));
 
       const recurringChargeTemplates =
         existingCharges.length === 0
@@ -165,7 +191,6 @@ export default function PrepareMonth() {
       }
 
       const existingGoalByPocket = new Map(existingGoals.map((g) => [g.pocket_id, g.planned_amount]));
-      const monthAlreadyPrepared = existingGoals.length > 0 || existingIncomes.length > 0 || existingCharges.length > 0;
       setGoals(
         householdPockets
           .filter((p) => p.usage_type !== 'depense') // un compte "dépense" n'a pas de réservation mensuelle
@@ -211,12 +236,13 @@ export default function PrepareMonth() {
   const liveBudget = useMemo(() => {
     return computeMonthlyBudget({
       safetyMargin: Number(String(safetyMargin).replace(',', '.')) || 0,
+      carryoverAmount: Number(String(carryoverAmount).replace(',', '.')) || 0,
       incomes: incomes.map((i) => ({ amount: Number(String(i.amount).replace(',', '.')) || 0 })),
       savingsGoals: goals.filter((g) => g.isActive).map((g) => ({ plannedAmount: Number(String(g.plannedAmount).replace(',', '.')) || 0 })),
       fixedCharges: charges.map((c) => ({ amount: Number(String(c.amount).replace(',', '.')) || 0 })),
       expenses: [],
     });
-  }, [incomes, goals, charges, safetyMargin]);
+  }, [incomes, goals, charges, safetyMargin, carryoverAmount]);
 
   function updateIncome(id, patch) {
     setIncomes((prev) => prev.map((i) => (i.id === id ? { ...i, ...patch } : i)));
@@ -279,6 +305,7 @@ export default function PrepareMonth() {
         householdId: profile.household_id,
         userId: profile.id,
         safetyMargin: Number(String(safetyMargin).replace(',', '.')) || 0,
+        carryoverAmount: Number(String(carryoverAmount).replace(',', '.')) || 0,
         incomes: incomes
           .filter((i) => i.amount !== '')
           .map((i) => ({ kind: i.kind, label: i.label, amount: Number(String(i.amount).replace(',', '.')) || 0, recurringIncomeId: i.recurringIncomeId || null, isRecurring: i.isRecurring })),
@@ -335,7 +362,11 @@ export default function PrepareMonth() {
           {liveBudget.initialBudget.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} €
         </p>
         <p className="text-xs text-white/70 mt-2">
-          {liveBudget.totalIncome.toLocaleString('fr-FR')} € de revenus − {liveBudget.totalPlannedSavings.toLocaleString('fr-FR')} € d'épargne prévue − {liveBudget.totalFixedCharges.toLocaleString('fr-FR')} € de charges − {liveBudget.safetyMargin.toLocaleString('fr-FR')} € de marge
+          {liveBudget.totalIncome.toLocaleString('fr-FR')} € de revenus
+          {liveBudget.carryoverAmount !== 0 && (liveBudget.carryoverAmount > 0
+            ? ` + ${liveBudget.carryoverAmount.toLocaleString('fr-FR')} € de report`
+            : ` − ${Math.abs(liveBudget.carryoverAmount).toLocaleString('fr-FR')} € de report`)}
+          {' '}− {liveBudget.totalPlannedSavings.toLocaleString('fr-FR')} € d'épargne prévue − {liveBudget.totalFixedCharges.toLocaleString('fr-FR')} € de charges − {liveBudget.safetyMargin.toLocaleString('fr-FR')} € de marge
         </p>
       </section>
 
@@ -512,6 +543,32 @@ export default function PrepareMonth() {
           </button>
         )}
         </>
+        )}
+      </section>
+
+      <section className="bg-white rounded-card p-5 shadow-sm">
+        <button onClick={() => toggleSection('report')} className="w-full flex justify-between items-center">
+          <h2 className="font-semibold">Report du mois précédent</h2>
+          <span className="flex items-center gap-2 text-sm text-ink/60">
+            {(Number(String(carryoverAmount).replace(',', '.')) || 0).toLocaleString('fr-FR')} €
+            <span className="text-ink/40 text-xs">{openSection === 'report' ? '▲' : '▼'}</span>
+          </span>
+        </button>
+        {openSection === 'report' && (
+        <div className="mt-3 pt-3 border-t border-teal-light">
+          <p className="text-xs text-ink/50 mb-2">
+            Suggéré automatiquement à partir de votre reste à dépenser réel du mois précédent (positif ou négatif) — toujours modifiable ici, y compris pour le mettre à 0 si vous ne voulez pas de report.
+          </p>
+          <div className="relative w-32">
+            <input
+              inputMode="decimal"
+              value={carryoverAmount}
+              onChange={(e) => setCarryoverAmount(e.target.value)}
+              className="w-full bg-cream rounded-xl px-3 py-2 pr-6 border border-teal-light text-sm text-right"
+            />
+            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-ink/40 text-xs">€</span>
+          </div>
+        </div>
         )}
       </section>
 

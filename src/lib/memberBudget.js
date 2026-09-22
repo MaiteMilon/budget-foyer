@@ -21,6 +21,7 @@ export async function loadMemberBudget(member, monthISO) {
 
   const budget = computeMonthlyBudget({
     safetyMargin: month.safety_margin,
+    carryoverAmount: month.carryover_amount,
     incomes,
     savingsGoals: goals.map((g) => ({ plannedAmount: g.planned_amount })),
     fixedCharges: charges,

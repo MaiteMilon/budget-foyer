@@ -358,6 +358,7 @@ export default function Dashboard() {
               </thead>
               <tbody className="divide-y divide-teal-light">
                 <BudgetRow label="Revenus" memberBudgets={memberBudgets} getValue={(b) => b.totalIncome} />
+                <BudgetRow label="Report du mois précédent" memberBudgets={memberBudgets} getValue={(b) => b.carryoverAmount} />
                 <BudgetRow label="Charges fixes" memberBudgets={memberBudgets} getValue={(b) => -b.totalFixedCharges} />
                 <BudgetRow label="Épargne prévue" memberBudgets={memberBudgets} getValue={(b) => -b.totalPlannedSavings} />
                 <BudgetRow label="Marge de sécurité" memberBudgets={memberBudgets} getValue={(b) => -b.safetyMargin} />

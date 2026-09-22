@@ -54,6 +54,11 @@ create table budget_months (
   user_id uuid not null references profiles (id) on delete cascade,
   month date not null,                 -- toujours le 1er du mois, ex. 2026-10-01
   safety_margin numeric(10,2) not null default 0,
+  -- Report automatique du reste à dépenser du mois précédent (positif ou
+  -- négatif) — suggéré tout seul à la préparation du mois d'après, mais
+  -- toujours modifiable à la main ensuite. 0 par défaut (premier mois,
+  -- ou personne ne souhaitant pas ce report).
+  carryover_amount numeric(10,2) not null default 0,
   started_at timestamptz,              -- rempli quand l'utilisateur clique "Démarrer mon mois"
   created_at timestamptz not null default now(),
   unique (user_id, month)
@@ -1078,6 +1083,10 @@ create policy "recurring_savings_goals_update" on recurring_savings_goals
 drop policy if exists "recurring_savings_goals_delete" on recurring_savings_goals;
 create policy "recurring_savings_goals_delete" on recurring_savings_goals
   for delete using (owner_id = auth.uid());
+
+-- MIGRATION — Report automatique (et modifiable) du reste à dépenser
+-- d'un mois sur le suivant.
+alter table budget_months add column if not exists carryover_amount numeric(10,2) not null default 0;
 
 -- =====================================================================
 -- CATÉGORIES PAR DÉFAUT (insérées à la création d'un foyer, via trigger
