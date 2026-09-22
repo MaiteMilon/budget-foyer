@@ -19,7 +19,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [memberBudgets, setMemberBudgets] = useState([]);
-  const [goals, setGoals] = useState([]);
+  const [combinedGoals, setCombinedGoals] = useState([]);
   const [depenseAccounts, setDepenseAccounts] = useState([]);
   const [spentByPocket, setSpentByPocket] = useState(new Map());
   const [projects, setProjects] = useState([]);
@@ -37,9 +37,8 @@ export default function Dashboard() {
       setLoading(true);
       setLoadError(null);
       try {
-        const [members, monthGoals, expenses, pockets, projectsList] = await Promise.all([
+        const [members, expenses, pockets, projectsList] = await Promise.all([
           getHouseholdMembers(profile.household_id),
-          getMonthSavingsGoals(currentBudgetMonth.id),
           getMonthExpenses(currentBudgetMonth.id, profile.id),
           getHouseholdPockets(profile.household_id),
           getHouseholdProjects(profile.household_id),
@@ -52,13 +51,36 @@ export default function Dashboard() {
         if (cancelled) return;
         setMemberBudgets(budgets);
 
-        setGoals(
-          monthGoals.map((g) => ({
-            pocket: g.pocket,
-            plannedAmount: g.planned_amount,
-            actualPaidIn: g.actual_paid_in,
-          }))
+        // Objectifs du mois : pour un compte COMMUN, on combine l'objectif
+        // et le "versé" des deux membres (chacun a son propre objectif
+        // stocké dans son propre mois budgétaire) — avec le détail par
+        // personne. Pour un compte privé, uniquement le sien.
+        const goalsByMember = await Promise.all(
+          members.map(async (m) => {
+            const month = await getBudgetMonthForUser(m.id, currentBudgetMonth.month);
+            if (!month) return { member: m, goals: [] };
+            const goals = await getMonthSavingsGoals(month.id);
+            return { member: m, goals };
+          })
         );
+        if (cancelled) return;
+
+        const combined = pockets
+          .filter((p) => p.usage_type !== 'depense')
+          .map((p) => {
+            const perMember = goalsByMember
+              .filter(({ member }) => !p.is_private || member.id === profile.id)
+              .map(({ member, goals }) => {
+                const g = goals.find((g) => g.pocket_id === p.id);
+                return { member, planned: Number(g?.planned_amount) || 0, paid: Number(g?.actual_paid_in) || 0 };
+              });
+            const totalPlanned = perMember.reduce((s, x) => s + x.planned, 0);
+            const totalPaid = perMember.reduce((s, x) => s + x.paid, 0);
+            return { pocket: p, totalPlanned, totalPaid, perMember };
+          })
+          .filter((g) => g.totalPlanned > 0);
+        setCombinedGoals(combined);
+
         setDepenseAccounts(pockets.filter((p) => p.usage_type === 'depense'));
         setProjects(projectsList);
 
@@ -249,19 +271,16 @@ export default function Dashboard() {
 
       <section className="bg-white rounded-card p-5 shadow-sm">
         <h2 className="font-semibold mb-3">Objectifs du mois</h2>
-        {goals.length === 0 && (
+        {combinedGoals.length === 0 && (
           <p className="text-sm text-ink/40">Aucun objectif défini pour ce mois — ajoutez vos comptes d'épargne.</p>
         )}
         <ul className="space-y-4">
-          {goals.map((g, i) => {
-            const progress = computeGoalProgress({
-              plannedAmount: g.plannedAmount,
-              actualPaidIn: g.actualPaidIn,
-            });
+          {combinedGoals.map(({ pocket, totalPlanned, totalPaid, perMember }) => {
+            const progress = computeGoalProgress({ plannedAmount: totalPlanned, actualPaidIn: totalPaid });
             return (
-              <li key={i}>
+              <li key={pocket.id}>
                 <div className="flex justify-between text-sm mb-1">
-                  <span className="font-medium">{g.pocket?.icon} {g.pocket?.name}</span>
+                  <span className="font-medium">{pocket.icon} {pocket.name}</span>
                   <span className="text-ink/60">
                     {progress.paid.toLocaleString('fr-FR')} € / {progress.planned.toLocaleString('fr-FR')} €
                     {progress.isComplete ? ' ✓' : ''}
@@ -273,6 +292,16 @@ export default function Dashboard() {
                     style={{ width: `${Math.round(progress.ratio * 100)}%` }}
                   />
                 </div>
+                <p className="text-xs text-ink/40 mt-1">
+                  Solde actuel du compte : {Number(pocket.balance).toLocaleString('fr-FR')} €
+                </p>
+                {perMember.length > 1 && (
+                  <ul className="text-xs text-ink/50 mt-1 space-y-0.5">
+                    {perMember.map(({ member, paid }) => (
+                      <li key={member.id}>{paid.toLocaleString('fr-FR')} € versés par {member.display_name}</li>
+                    ))}
+                  </ul>
+                )}
               </li>
             );
           })}
