@@ -26,13 +26,14 @@ export const POCKET_KINDS = [
  * Le nom du compte est TOUJOURS saisi librement ici, jamais suggéré ou
  * codé en dur (chaque personne du foyer a ses propres comptes).
  */
-export default function QuickAddPocketForm({ onSubmit, onCancel }) {
-  const [name, setName] = useState('');
-  const [kind, setKind] = useState('epargne');
-  const [usageType, setUsageType] = useState('epargne');
-  const [isPrivate, setIsPrivate] = useState(false);
-  const [targetAmount, setTargetAmount] = useState('');
-  const [targetDate, setTargetDate] = useState('');
+export default function QuickAddPocketForm({ onSubmit, onCancel, initial }) {
+  const isEditing = Boolean(initial);
+  const [name, setName] = useState(initial?.name || '');
+  const [kind, setKind] = useState(initial?.kind || 'epargne');
+  const [usageType, setUsageType] = useState(initial?.usage_type || 'epargne');
+  const [isPrivate, setIsPrivate] = useState(initial?.is_private || false);
+  const [targetAmount, setTargetAmount] = useState(initial?.target_amount ? String(initial.target_amount) : '');
+  const [targetDate, setTargetDate] = useState(initial?.target_date || '');
   const [submitting, setSubmitting] = useState(false);
 
   async function handleSubmit(e) {
@@ -52,7 +53,7 @@ export default function QuickAddPocketForm({ onSubmit, onCancel }) {
 
   return (
     <form onSubmit={handleSubmit} className="bg-white rounded-card p-5 shadow-sm space-y-3">
-      <h2 className="font-semibold">Nouveau compte</h2>
+      <h2 className="font-semibold">{isEditing ? 'Modifier le compte' : 'Nouveau compte'}</h2>
 
       <input
         value={name}
@@ -134,7 +135,7 @@ export default function QuickAddPocketForm({ onSubmit, onCancel }) {
           disabled={submitting}
           className="flex-1 bg-teal text-white text-sm font-semibold rounded-xl py-2 disabled:opacity-50"
         >
-          Ajouter
+          {submitting ? 'Enregistrement…' : isEditing ? 'Enregistrer' : 'Ajouter'}
         </button>
       </div>
     </form>
