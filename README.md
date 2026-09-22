@@ -472,14 +472,71 @@ d'octobre) : nouvelle colonne `carryover_amount` sur `budget_months`.
   "personnalisé" (ex. du 28 au 27, propre à chaque personne) a été
   proposé mais refusé comme trop complexe — non construit.
 
-## 24. Prochaines étapes (par ordre de priorité proposé)
+## 24. Correctif — budget affiché à l'autre membre faussé par un compte privé
+
+Bug découvert par l'utilisatrice (écran capturé sur le téléphone de
+Stéphane, "Budget initial" 300 € trop élevé par rapport au même mois vu
+depuis le téléphone de Maïté). Cause : `savings_goals` est filtré par
+RLS selon les comptes privés VISIBLES par celui qui consulte — donc
+quand Stéphane charge le budget de Maïté, l'objectif d'épargne lié à un
+compte privé à elle disparaît silencieusement du calcul, gonflant son
+"Budget initial" affiché à lui de ce montant.
+
+- Nouvelle fonction SQL `get_month_total_planned_savings(p_budget_month_id)`
+  (SECURITY DEFINER, vérifie que l'appelant est du même foyer) qui
+  renvoie le VRAI total des objectifs d'épargne du mois, y compris ceux
+  liés à un compte privé de l'autre — sans jamais révéler lequel ni son
+  montant précis, juste le total agrégé.
+- `data.js` : nouvelle fonction `getMonthTotalPlannedSavings()`.
+- `memberBudget.js` : utilise ce total à la place de la liste de
+  `savings_goals` filtrée par RLS pour calculer `initialBudget`.
+- Conséquence assumée et validée avec l'utilisatrice : le total affiché
+  à l'autre membre est désormais exact, mais peut ne plus "tomber juste"
+  s'il refait le calcul lui-même à partir des revenus et charges
+  visibles (qui, eux, restent §16 transparents) — c'est le prix normal
+  d'une confidentialité réellement absolue sur les comptes privés.
+
+## 25. Bouton "J'ai reçu mon salaire"
+
+À la demande explicite de l'utilisatrice après discussion sur le
+décalage entre son salaire à date variable (20, 26, 28 selon les mois)
+et le découpage calendaire de l'app (§23 avait déjà traité l'écart de
+fond avec le report, mais pas le délai d'attente du 1ᵉʳ du mois pour que
+le mois suivant existe vraiment).
+
+- **`AppContext.jsx`** : le "mois actif" de toute l'app n'est plus
+  strictement le mois calendaire. Si le mois suivant a déjà été
+  démarré (`started_at` rempli), c'est LUI qui devient actif partout
+  (dépenses, Accueil, etc.) — même avant que le calendrier ne l'atteigne.
+- **`Dashboard.jsx`** : le bouton *"💰 J'ai reçu mon salaire — préparer
+  [mois] →"* est désormais visible n'importe quel jour du mois (avant,
+  il n'apparaissait que dans les 6 derniers jours du mois calendaire),
+  dès que le mois en cours est déjà préparé et que le mois suivant ne
+  l'est pas encore. Clique dessus → écran Préparer mon mois du mois
+  suivant, avec les montants de revenus déjà pré-remplis depuis les
+  gabarits mais modifiables (pour une prime, un mois incomplet, etc.) —
+  fonctionnalité déjà existante de l'écran, réutilisée telle quelle.
+- Dès la validation ("Enregistrer"), `markStarted: true` est déjà
+  envoyé (comportement existant) et `refresh()` recharge aussitôt le
+  contexte : le nouveau mois devient actif immédiatement, sans étape
+  supplémentaire.
+- Chaque personne du foyer a son propre bouton, indépendant : Stéphane
+  peut démarrer son mois à une date différente de Maïté sans que ça
+  affecte son mois à elle (chacun son `budget_months`, comme toujours).
+- **Non modifié, volontairement** : aucune notion de plage de dates
+  personnalisée n'a été ajoutée nulle part — chaque dépense reste
+  simplement rattachée au `budget_month_id` actif au moment où elle est
+  créée (c'était déjà le mécanisme existant, pas dérivé de sa date), ce
+  qui a rendu ce chantier beaucoup plus simple que prévu au départ.
+
+## 26. Prochaines étapes (par ordre de priorité proposé)
 
 1. **Notifications** (§16) : Web Push via le service worker déjà généré
    par `vite-plugin-pwa`, déclenchées par des fonctions Supabase Edge sur
    les seuils (50 % du budget, délai de réflexion terminé, etc.).
 2. **Export CSV/PDF** (§20).
 
-## 25. Pour tester à deux dès maintenant
+## 27. Pour tester à deux dès maintenant
 
 1. Créer un projet Supabase, exécuter `supabase/schema.sql` dans son
    éditeur SQL, renseigner `.env` (voir §5).

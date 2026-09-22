@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { computeGoalProgress } from '../lib/budget-engine.js';
 import { useApp } from '../context/AppContext.jsx';
 import { signOut } from '../lib/auth.js';
-import { addMonthsISO, monthLabel, isNearMonthEnd } from '../lib/date-utils.js';
+import { addMonthsISO, monthLabel } from '../lib/date-utils.js';
 import {
   getMonthSavingsGoals,
   getMonthExpenses,
@@ -118,13 +118,14 @@ export default function Dashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentBudgetMonth, profile]);
 
-  // Bannière "Préparer [mois suivant]" : seulement dans les derniers jours
-  // du mois, seulement si le mois EN COURS est déjà préparé (pas de sens
-  // sinon), et seulement si le mois suivant n'est pas déjà démarré.
+  // Bouton "J'ai reçu mon salaire" : visible dès que le mois en cours est
+  // déjà préparé et que le mois suivant n'a pas encore été démarré — à
+  // N'IMPORTE QUEL moment du mois, jamais seulement en fin de mois,
+  // puisque le salaire n'arrive pas à date fixe (§ demande explicite).
   useEffect(() => {
     let cancelled = false;
     async function checkNextMonth() {
-      if (!currentBudgetMonth?.started_at || !isNearMonthEnd()) {
+      if (!currentBudgetMonth?.started_at) {
         setNextMonthToPrep(null);
         return;
       }
@@ -192,7 +193,7 @@ export default function Dashboard() {
           to={`/preparer?month=${nextMonthToPrep}`}
           className="block bg-teal-light text-teal-dark rounded-card px-4 py-3 text-sm font-semibold"
         >
-          Préparer {monthLabel(nextMonthToPrep)} →
+          💰 J'ai reçu mon salaire — préparer {monthLabel(nextMonthToPrep)} →
         </Link>
       )}
 

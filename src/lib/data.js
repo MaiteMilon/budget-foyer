@@ -81,6 +81,21 @@ export async function getMonthSavingsGoals(budgetMonthId) {
   return data;
 }
 
+/**
+ * Total réel des objectifs d'épargne prévus pour un mois, y compris ceux
+ * liés à un compte privé de l'AUTRE membre du foyer (invisibles via
+ * getMonthSavingsGoals à cause de la RLS) — nécessaire pour que le
+ * "Budget initial" affiché à l'autre membre soit exact, sans jamais lui
+ * révéler quel compte ou quel montant précis compose ce total.
+ */
+export async function getMonthTotalPlannedSavings(budgetMonthId) {
+  const { data, error } = await supabase.rpc('get_month_total_planned_savings', {
+    p_budget_month_id: budgetMonthId,
+  });
+  if (error) throw error;
+  return Number(data) || 0;
+}
+
 export async function getMonthFixedCharges(budgetMonthId) {
   const { data, error } = await supabase
     .from('fixed_charge_entries')

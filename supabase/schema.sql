@@ -1088,6 +1088,40 @@ create policy "recurring_savings_goals_delete" on recurring_savings_goals
 -- d'un mois sur le suivant.
 alter table budget_months add column if not exists carryover_amount numeric(10,2) not null default 0;
 
+-- MIGRATION — Correctif : quand Stéphane consulte le budget de Maïté (ou
+-- inversement) sur l'écran "Notre foyer", la RLS de savings_goals cache
+-- les objectifs liés à un compte privé de l'autre — donc le montant
+-- épargné n'était jamais déduit du budget affiché à l'autre membre,
+-- gonflant son "Budget initial" du montant privé. Cette fonction calcule
+-- le VRAI total (y compris les objectifs privés), sans jamais révéler
+-- à l'appelant quel compte ou quel montant précis en est la cause —
+-- juste le total qui sert au calcul du budget disponible (§ confiden-
+-- tialité absolue des comptes privés, mais total toujours exact).
+create or replace function get_month_total_planned_savings(p_budget_month_id uuid)
+returns numeric
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_household uuid;
+  v_total numeric;
+begin
+  select household_id into v_household from budget_months where id = p_budget_month_id;
+  if v_household is null or v_household <> my_household_id() then
+    raise exception 'not authorized';
+  end if;
+
+  select coalesce(sum(planned_amount), 0) into v_total
+  from savings_goals
+  where budget_month_id = p_budget_month_id;
+
+  return v_total;
+end;
+$$;
+
+grant execute on function get_month_total_planned_savings(uuid) to authenticated;
+
 -- =====================================================================
 -- CATÉGORIES PAR DÉFAUT (insérées à la création d'un foyer, via trigger
 -- applicatif ou fonction ; laissé volontairement hors DDL pour rester

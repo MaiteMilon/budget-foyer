@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState, useCallback } from 'rea
 import { supabase } from '../lib/supabaseClient.js';
 import { getOrCreateBudgetMonth } from '../lib/data.js';
 import { ensureProfileExists } from '../lib/auth.js';
+import { addMonthsISO } from '../lib/date-utils.js';
 
 const AppContext = createContext(null);
 
@@ -73,13 +74,29 @@ export function AppProvider({ children }) {
       return;
     }
 
+    const thisMonthISO = currentMonthISO();
     const month = await getOrCreateBudgetMonth(
       profile.household_id,
       profile.id,
-      currentMonthISO()
+      thisMonthISO
     );
 
-    setState({ status: 'ready', session, profile, currentBudgetMonth: month });
+    // "J'ai reçu mon salaire" : si le mois suivant a déjà été démarré
+    // (bouton cliqué sur l'Accueil), c'est LUI qui devient le mois actif
+    // — pour toute l'app (dépenses, dashboard, etc.) — même si le
+    // calendrier n'a pas encore atteint ce mois. Le salaire arrivant à
+    // une date variable, on ne se fie jamais à la date du jour seule.
+    const nextMonthISO = addMonthsISO(thisMonthISO, 1);
+    const { data: nextMonth } = await supabase
+      .from('budget_months')
+      .select('*')
+      .eq('user_id', profile.id)
+      .eq('month', nextMonthISO)
+      .maybeSingle();
+
+    const activeMonth = nextMonth?.started_at ? nextMonth : month;
+
+    setState({ status: 'ready', session, profile, currentBudgetMonth: activeMonth });
   }
 
   const refresh = useCallback(async () => {
