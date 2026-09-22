@@ -129,6 +129,18 @@ export async function deletePocket(pocketId) {
   if (error) throw error;
 }
 
+/** Modifie un compte existant (nom, type, objectif, confidentialité...). */
+export async function updatePocket(pocketId, patch) {
+  const { data, error } = await supabase
+    .from('savings_pockets')
+    .update(patch)
+    .eq('id', pocketId)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
 export async function deleteFixedCharge(chargeId) {
   const { error } = await supabase.from('fixed_charges').delete().eq('id', chargeId);
   if (error) throw error;
