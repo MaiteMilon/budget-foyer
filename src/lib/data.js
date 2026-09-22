@@ -141,6 +141,25 @@ export async function updatePocket(pocketId, patch) {
   return data;
 }
 
+/**
+ * Corrige directement le solde réel d'un compte (ex. rattraper un solde
+ * déjà existant avant d'utiliser l'app, comme un versement fait le mois
+ * dernier). Contrairement à "+Verser" (recordPocketTransfer), ceci ne
+ * touche JAMAIS l'objectif d'un mois ni son "versé ce mois-ci" — c'est
+ * une correction de la réalité, pas un versement qui vient de se
+ * produire maintenant.
+ */
+export async function correctPocketBalance(pocketId, newBalance) {
+  const { data, error } = await supabase
+    .from('savings_pockets')
+    .update({ balance: newBalance })
+    .eq('id', pocketId)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
 export async function deleteFixedCharge(chargeId) {
   const { error } = await supabase.from('fixed_charges').delete().eq('id', chargeId);
   if (error) throw error;
