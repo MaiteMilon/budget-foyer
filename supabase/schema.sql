@@ -253,6 +253,27 @@ create table pocket_transfers (
 -- 6. ENVIES D'ACHAT — STRICTEMENT PRIVÉES (règle absolue §15)
 -- ---------------------------------------------------------------------
 
+-- ---------------------------------------------------------------------
+-- 6bis. PROJETS — but d'épargne libre, totalement indépendant des
+-- comptes (§ "Mes projets ne doit pas montrer les comptes d'épargne").
+-- On y verse manuellement (ex. argent physique mis de côté dans une
+-- boîte à la maison) ; ça ne touche JAMAIS le budget disponible ni le
+-- solde d'aucun compte — c'est un simple suivi.
+-- ---------------------------------------------------------------------
+
+create table projects (
+  id uuid primary key default uuid_generate_v4(),
+  household_id uuid not null references households (id) on delete cascade,
+  owner_id uuid references profiles (id) on delete cascade, -- NULL = commun
+  name text not null,
+  icon text,
+  target_amount numeric(10,2) not null,
+  target_date date,
+  current_amount numeric(10,2) not null default 0,
+  is_private boolean not null default false,
+  created_at timestamptz not null default now()
+);
+
 create table wishlist_items (
   id uuid primary key default uuid_generate_v4(),
   owner_id uuid not null references profiles (id) on delete cascade, -- SEUL lecteur autorisé
@@ -302,6 +323,7 @@ alter table expenses enable row level security;
 alter table expense_categories enable row level security;
 alter table pocket_transfers enable row level security;
 alter table wishlist_items enable row level security;
+alter table projects enable row level security;
 alter table household_activity_log enable row level security;
 alter table installment_plans enable row level security;
 
@@ -469,6 +491,17 @@ create policy "pocket_transfers_household" on pocket_transfers
 create policy "wishlist_owner_only" on wishlist_items
   for all using (owner_id = auth.uid())
   with check (owner_id = auth.uid());
+
+-- projects : même principe que les comptes (savings_pockets) — visible
+-- par le foyer sauf si privé, modifiable par les deux si commun.
+create policy "projects_select" on projects
+  for select using (household_id = my_household_id() and (is_private = false or owner_id = auth.uid()));
+create policy "projects_insert" on projects
+  for insert with check (household_id = my_household_id());
+create policy "projects_update" on projects
+  for update using (household_id = my_household_id() and (is_private = false or owner_id = auth.uid()));
+create policy "projects_delete" on projects
+  for delete using (household_id = my_household_id() and (is_private = false or owner_id = auth.uid()));
 
 create policy "activity_log_household_read" on household_activity_log
   for select using (household_id = my_household_id());
@@ -917,6 +950,34 @@ create policy "recurring_incomes_update" on recurring_incomes
 drop policy if exists "recurring_incomes_delete" on recurring_incomes;
 create policy "recurring_incomes_delete" on recurring_incomes
   for delete using (owner_id = auth.uid());
+
+-- MIGRATION — table "projects" (but d'épargne libre, indépendant des comptes).
+create table if not exists projects (
+  id uuid primary key default uuid_generate_v4(),
+  household_id uuid not null references households (id) on delete cascade,
+  owner_id uuid references profiles (id) on delete cascade,
+  name text not null,
+  icon text,
+  target_amount numeric(10,2) not null,
+  target_date date,
+  current_amount numeric(10,2) not null default 0,
+  is_private boolean not null default false,
+  created_at timestamptz not null default now()
+);
+alter table projects enable row level security;
+
+drop policy if exists "projects_select" on projects;
+create policy "projects_select" on projects
+  for select using (household_id = my_household_id() and (is_private = false or owner_id = auth.uid()));
+drop policy if exists "projects_insert" on projects;
+create policy "projects_insert" on projects
+  for insert with check (household_id = my_household_id());
+drop policy if exists "projects_update" on projects;
+create policy "projects_update" on projects
+  for update using (household_id = my_household_id() and (is_private = false or owner_id = auth.uid()));
+drop policy if exists "projects_delete" on projects;
+create policy "projects_delete" on projects
+  for delete using (household_id = my_household_id() and (is_private = false or owner_id = auth.uid()));
 
 -- =====================================================================
 -- CATÉGORIES PAR DÉFAUT (insérées à la création d'un foyer, via trigger

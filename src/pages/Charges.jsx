@@ -55,6 +55,7 @@ export default function Charges() {
   const [pendingScopeChoice, setPendingScopeChoice] = useState(null);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [expandedPerson, setExpandedPerson] = useState(null); // null | 'mine' | 'others'
 
   async function load() {
     setLoading(true);
@@ -329,22 +330,73 @@ export default function Charges() {
         onToggleActive={handleToggleActive}
         onTogglePaid={handleTogglePaid}
       />
-      <ChargeGroup
-        title="Mes charges personnelles"
+
+      <PersonChargesTile
+        name={profile.display_name}
         charges={grouped.mine}
         entriesByCharge={entriesByCharge}
+        expanded={expandedPerson === 'mine'}
+        onToggle={() => setExpandedPerson(expandedPerson === 'mine' ? null : 'mine')}
+        editable
         onEdit={openEdit}
         onDelete={handleDelete}
         onToggleActive={handleToggleActive}
         onTogglePaid={handleTogglePaid}
       />
-      <ChargeGroup
-        title={`Charges ${otherMember ? `de ${otherMember.display_name}` : "de l'autre membre"}`}
+      <PersonChargesTile
+        name={otherMember?.display_name || "L'autre membre"}
         charges={grouped.others}
         entriesByCharge={entriesByCharge}
-        readOnly
+        expanded={expandedPerson === 'others'}
+        onToggle={() => setExpandedPerson(expandedPerson === 'others' ? null : 'others')}
+        editable={false}
       />
     </div>
+  );
+}
+
+/** Tuile pliable par personne : total en un coup d'œil, détail (modifiable ou lecture seule) au clic. */
+function PersonChargesTile({ name, charges, entriesByCharge, expanded, onToggle, editable, onEdit, onDelete, onToggleActive, onTogglePaid }) {
+  const total = charges
+    .filter((c) => c.is_active)
+    .reduce((sum, c) => sum + Number(entriesByCharge.get(c.id)?.amount ?? c.default_amount), 0);
+
+  return (
+    <section className="bg-white rounded-card p-5 shadow-sm">
+      <button onClick={onToggle} className="w-full flex justify-between items-center">
+        <span className="font-semibold">{name}</span>
+        <span className="flex items-center gap-2">
+          <span className="text-sm text-ink/60">{total.toLocaleString('fr-FR')} €</span>
+          <span className="text-ink/40 text-xs">{expanded ? '▲' : '▼'}</span>
+        </span>
+      </button>
+
+      {expanded && (
+        <div className="mt-3 pt-3 border-t border-teal-light">
+          {charges.length === 0 && (
+            <p className="text-sm text-ink/40">{editable ? "Aucune charge pour l'instant." : 'Aucune charge renseignée.'}</p>
+          )}
+          <ul className="space-y-2">
+            {charges.map((c) => (
+              <ChargeRow
+                key={c.id}
+                charge={c}
+                entry={entriesByCharge.get(c.id)}
+                onEdit={onEdit}
+                onDelete={onDelete}
+                onToggleActive={onToggleActive}
+                onTogglePaid={onTogglePaid}
+                dimmed={!c.is_active}
+                readOnly={!editable}
+              />
+            ))}
+          </ul>
+          {!editable && charges.length > 0 && (
+            <p className="text-xs text-ink/30 mt-3">Lecture seule — chacun gère uniquement ses propres charges.</p>
+          )}
+        </div>
+      )}
+    </section>
   );
 }
 

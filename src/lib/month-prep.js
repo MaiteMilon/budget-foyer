@@ -63,16 +63,42 @@ export async function saveMonthPreparation({
   userId,
   markStarted,
 }) {
-  // 1. Revenus : remplacement complet, propre à ce mois.
+  // 1. Revenus : pour tout revenu coché "fixe / récurrent" sans gabarit
+  // lié, on crée d'abord le gabarit (recurring_incomes) pour qu'il soit
+  // proposé automatiquement les mois suivants et retrouvable dans
+  // l'écran Revenus — même principe que les charges ci-dessous.
+  const resolvedIncomes = [];
+  for (const income of incomes) {
+    let recurringIncomeId = income.recurringIncomeId;
+    if (income.isRecurring && !recurringIncomeId) {
+      const { data: template, error: templateError } = await supabase
+        .from('recurring_incomes')
+        .insert({
+          household_id: householdId,
+          owner_id: userId,
+          label: income.label || labelForKind(income.kind),
+          kind: income.kind,
+          default_amount: income.amount,
+          is_active: true,
+        })
+        .select()
+        .single();
+      if (templateError) throw templateError;
+      recurringIncomeId = template.id;
+    }
+    resolvedIncomes.push({ ...income, recurringIncomeId });
+  }
+
+  // Remplacement complet, propre à ce mois.
   const { error: delIncomesError } = await supabase
     .from('incomes')
     .delete()
     .eq('budget_month_id', budgetMonthId);
   if (delIncomesError) throw delIncomesError;
 
-  if (incomes.length > 0) {
+  if (resolvedIncomes.length > 0) {
     const { error: insIncomesError } = await supabase.from('incomes').insert(
-      incomes.map((i) => ({
+      resolvedIncomes.map((i) => ({
         budget_month_id: budgetMonthId,
         kind: i.kind,
         label: i.label || labelForKind(i.kind),

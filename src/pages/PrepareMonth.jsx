@@ -106,6 +106,7 @@ export default function PrepareMonth() {
           existingIncomes.map((i) => ({
             id: i.id, kind: i.kind, label: i.label, amount: String(i.amount),
             recurringIncomeId: i.recurring_income_id || null,
+            isRecurring: Boolean(i.recurring_income_id),
           }))
         );
       } else if (recurringIncomeTemplates.length > 0) {
@@ -114,16 +115,16 @@ export default function PrepareMonth() {
         setIncomes(
           recurringIncomeTemplates.map((t) => ({
             id: uid(), kind: t.kind, label: t.label, amount: String(t.default_amount),
-            recurringIncomeId: t.id,
+            recurringIncomeId: t.id, isRecurring: true,
           }))
         );
       } else if (prevIncomes.length > 0) {
         // Repli pour un mois préparé avant l'écran Revenus (aucun gabarit encore créé).
         setIncomes(
-          prevIncomes.map((i) => ({ id: uid(), kind: i.kind, label: i.label, amount: String(i.amount), recurringIncomeId: null }))
+          prevIncomes.map((i) => ({ id: uid(), kind: i.kind, label: i.label, amount: String(i.amount), recurringIncomeId: null, isRecurring: false }))
         );
       } else {
-        setIncomes([{ id: uid(), kind: 'salaire', label: 'Salaire', amount: '', recurringIncomeId: null }]);
+        setIncomes([{ id: uid(), kind: 'salaire', label: 'Salaire', amount: '', recurringIncomeId: null, isRecurring: false }]);
       }
 
       if (existingCharges.length > 0) {
@@ -197,7 +198,7 @@ export default function PrepareMonth() {
     setIncomes((prev) => prev.map((i) => (i.id === id ? { ...i, ...patch } : i)));
   }
   function addIncomeRow() {
-    setIncomes((prev) => [...prev, { id: uid(), kind: 'autre_revenu', label: '', amount: '' }]);
+    setIncomes((prev) => [...prev, { id: uid(), kind: 'autre_revenu', label: '', amount: '', isRecurring: false, recurringIncomeId: null }]);
   }
   function removeIncomeRow(id) {
     setIncomes((prev) => prev.filter((i) => i.id !== id));
@@ -252,7 +253,7 @@ export default function PrepareMonth() {
         safetyMargin: Number(String(safetyMargin).replace(',', '.')) || 0,
         incomes: incomes
           .filter((i) => i.amount !== '')
-          .map((i) => ({ kind: i.kind, label: i.label, amount: Number(String(i.amount).replace(',', '.')) || 0, recurringIncomeId: i.recurringIncomeId || null })),
+          .map((i) => ({ kind: i.kind, label: i.label, amount: Number(String(i.amount).replace(',', '.')) || 0, recurringIncomeId: i.recurringIncomeId || null, isRecurring: i.isRecurring })),
         chargeEntries: charges
           .filter((c) => c.amount !== '')
           .map((c) => ({
@@ -313,30 +314,40 @@ export default function PrepareMonth() {
         <h2 className="font-semibold mb-3">Mes revenus</h2>
         <div className="space-y-3">
           {incomes.map((income) => (
-            <div key={income.id} className="flex gap-2 items-center">
-              <select
-                value={income.kind}
-                onChange={(e) => updateIncome(income.id, { kind: e.target.value })}
-                className="bg-cream rounded-xl px-2 py-2 border border-teal-light text-sm w-28 shrink-0"
-              >
-                {INCOME_KINDS.map((k) => <option key={k.id} value={k.id}>{k.label}</option>)}
-              </select>
-              <input
-                value={income.label}
-                onChange={(e) => updateIncome(income.id, { label: e.target.value })}
-                placeholder="Libellé"
-                className="flex-1 bg-cream rounded-xl px-3 py-2 border border-teal-light text-sm min-w-0"
-              />
-              <input
-                inputMode="decimal"
-                value={income.amount}
-                onChange={(e) => updateIncome(income.id, { amount: e.target.value })}
-                placeholder="0"
-                className="w-20 bg-cream rounded-xl px-2 py-2 border border-teal-light text-sm text-right"
-              />
-              <button onClick={() => removeIncomeRow(income.id)} className="text-coral text-lg shrink-0" aria-label="Supprimer">
-                ×
-              </button>
+            <div key={income.id} className="border border-teal-light rounded-2xl p-3 space-y-2">
+              <div className="flex gap-2 items-center">
+                <select
+                  value={income.kind}
+                  onChange={(e) => updateIncome(income.id, { kind: e.target.value })}
+                  className="bg-cream rounded-xl px-2 py-2 border border-teal-light text-sm w-28 shrink-0"
+                >
+                  {INCOME_KINDS.map((k) => <option key={k.id} value={k.id}>{k.label}</option>)}
+                </select>
+                <input
+                  value={income.label}
+                  onChange={(e) => updateIncome(income.id, { label: e.target.value })}
+                  placeholder="Libellé"
+                  className="flex-1 bg-cream rounded-xl px-3 py-2 border border-teal-light text-sm min-w-0"
+                />
+                <input
+                  inputMode="decimal"
+                  value={income.amount}
+                  onChange={(e) => updateIncome(income.id, { amount: e.target.value })}
+                  placeholder="0"
+                  className="w-20 bg-cream rounded-xl px-2 py-2 border border-teal-light text-sm text-right"
+                />
+                <button onClick={() => removeIncomeRow(income.id)} className="text-coral text-lg shrink-0" aria-label="Supprimer">
+                  ×
+                </button>
+              </div>
+              <label className="flex items-center gap-1.5 text-xs text-ink/60">
+                <input
+                  type="checkbox"
+                  checked={income.isRecurring}
+                  onChange={(e) => updateIncome(income.id, { isRecurring: e.target.checked })}
+                />
+                Fixe / récurrent (proposé automatiquement les mois suivants — retrouvable dans "Revenus")
+              </label>
             </div>
           ))}
         </div>

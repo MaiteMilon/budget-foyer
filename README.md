@@ -342,14 +342,61 @@ visible par les deux, sauf ce qui est explicitement privé.**
   membre du foyer, partagé entre `Dashboard.jsx` et `Foyer.jsx` pour
   éviter la duplication.
 
-## 17. Prochaines étapes (par ordre de priorité proposé)
+## 17. "Mes projets" — vraiment indépendant des comptes
+
+Corrige une confusion de ma part : la première version de "Mes projets"
+réutilisait le champ `target_amount` des comptes d'épargne, ce qui le
+faisait afficher exactement les mêmes lignes qu'"Objectifs du mois".
+Nouvelle table `projects`, totalement séparée de `savings_pockets` :
+
+- Démarre **vide**. Un crayon ✏️ à côté du titre ouvre le formulaire de
+  création (nom, somme visée, date limite optionnelle, privé ou non).
+- On y verse manuellement (bouton "+ Verser") — ex. de l'argent physique
+  mis de côté dans une boîte à la maison, qu'on vient ensuite déclarer
+  dans l'app. Ça ne touche **jamais** le budget disponible ni le solde
+  d'aucun compte : c'est un simple suivi, complètement hors du calcul.
+- Même règle de confidentialité que les comptes : privé = visible du
+  seul créateur ; commun = les deux peuvent voir et verser.
+
+Au passage, correction d'un problème d'affichage : le détail par personne
+sur l'Accueil (nom + budget initial/dépensé/reste) passait sur deux
+lignes qui se chevauchaient sur mobile — recalé en petite grille à trois
+colonnes sous le nom, comme le reste de l'app.
+
+## 18. Trois derniers ajustements
+
+- **Clavier qui s'ouvrait tout seul sur "Dépenses"** : le focus
+  automatique sur le champ montant retiré (`AddExpense.jsx`) — le clavier
+  ne s'ouvre plus qu'au clic dans le champ.
+- **"Budget" sur l'Accueil** (ex-"Mon budget") : devient un vrai tableau
+  à une colonne par membre du foyer (Revenus, Charges fixes, Épargne
+  prévue, Marge, Dépenses), plus seulement les chiffres de la personne
+  connectée.
+- **Écran Charges réorganisé** : au lieu de sections toujours dépliées,
+  deux tuiles pliables par personne (nom + total), qu'on ouvre pour voir
+  le détail — modifiable pour la sienne, lecture seule pour celle de
+  l'autre membre. "Charges communes" reste une section à part, modifiable
+  par les deux.
+
+## 19. Revenu "fixe" directement depuis Préparer mon mois
+
+Corrige un vrai manque signalé : ajouter un revenu depuis "Préparer mon
+mois" ne le faisait apparaître que pour ce mois-ci, jamais dans l'écran
+**Revenus**. Chaque revenu a désormais une case **"Fixe / récurrent"** —
+si cochée, un gabarit `recurring_incomes` est créé automatiquement (même
+mécanisme que pour les charges), et le revenu devient immédiatement
+consultable/modifiable dans **Revenus**, proposé chaque mois suivant sans
+ressaisie. Non cochée, il reste ponctuel : ajouté une seule fois à ce
+mois, sans suite.
+
+## 20. Prochaines étapes (par ordre de priorité proposé)
 
 1. **Notifications** (§16) : Web Push via le service worker déjà généré
    par `vite-plugin-pwa`, déclenchées par des fonctions Supabase Edge sur
    les seuils (50 % du budget, délai de réflexion terminé, etc.).
 2. **Export CSV/PDF** (§20).
 
-## 18. Pour tester à deux dès maintenant
+## 21. Pour tester à deux dès maintenant
 
 1. Créer un projet Supabase, exécuter `supabase/schema.sql` dans son
    éditeur SQL, renseigner `.env` (voir §5).

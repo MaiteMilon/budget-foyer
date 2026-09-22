@@ -105,7 +105,6 @@ export default function AddExpense() {
               <input
                 type="text"
                 inputMode="decimal"
-                autoFocus
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
                 placeholder="0,00"

@@ -12,6 +12,7 @@ import {
   getHouseholdMembers,
 } from '../lib/data.js';
 import { loadMemberBudget } from '../lib/memberBudget.js';
+import { getHouseholdProjects, createProject, contributeToProject } from '../lib/projects.js';
 
 export default function Dashboard() {
   const { profile, currentBudgetMonth, refresh } = useApp();
@@ -19,10 +20,15 @@ export default function Dashboard() {
   const [loadError, setLoadError] = useState(null);
   const [memberBudgets, setMemberBudgets] = useState([]);
   const [goals, setGoals] = useState([]);
-  const [pocketsWithTarget, setPocketsWithTarget] = useState([]);
   const [depenseAccounts, setDepenseAccounts] = useState([]);
   const [spentByPocket, setSpentByPocket] = useState(new Map());
+  const [projects, setProjects] = useState([]);
   const [nextMonthToPrep, setNextMonthToPrep] = useState(null); // '2026-10-01' si à préparer, sinon null
+
+  async function loadProjects() {
+    const data = await getHouseholdProjects(profile.household_id);
+    setProjects(data);
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -31,11 +37,12 @@ export default function Dashboard() {
       setLoading(true);
       setLoadError(null);
       try {
-        const [members, monthGoals, expenses, pockets] = await Promise.all([
+        const [members, monthGoals, expenses, pockets, projectsList] = await Promise.all([
           getHouseholdMembers(profile.household_id),
           getMonthSavingsGoals(currentBudgetMonth.id),
           getMonthExpenses(currentBudgetMonth.id, profile.id),
           getHouseholdPockets(profile.household_id),
+          getHouseholdProjects(profile.household_id),
         ]);
         if (cancelled) return;
 
@@ -52,8 +59,8 @@ export default function Dashboard() {
             actualPaidIn: g.actual_paid_in,
           }))
         );
-        setPocketsWithTarget(pockets.filter((p) => p.target_amount && Number(p.target_amount) > 0 && p.usage_type !== 'depense'));
         setDepenseAccounts(pockets.filter((p) => p.usage_type === 'depense'));
+        setProjects(projectsList);
 
         const spentMap = new Map();
         expenses.forEach((e) => {
@@ -115,7 +122,6 @@ export default function Dashboard() {
   const spentRatio = householdTotals && householdTotals.initialBudget > 0
     ? Math.min(1, Math.max(0, householdTotals.totalSpent / householdTotals.initialBudget))
     : 0;
-  const myBudget = memberBudgets.find((b) => b.member.id === profile.id)?.budget;
 
   return (
     <div className="space-y-5">
@@ -186,14 +192,25 @@ export default function Dashboard() {
           </p>
         )}
 
-        <div className="mt-4 pt-4 border-t border-white/20 space-y-2">
+        <div className="mt-4 pt-4 border-t border-white/20 space-y-3">
           {memberBudgets.map(({ member, budget }) => (
-            <div key={member.id} className="flex justify-between items-center text-sm">
-              <span className="font-medium">{member.display_name}</span>
+            <div key={member.id}>
+              <p className="text-sm font-medium mb-1">{member.display_name}</p>
               {budget ? (
-                <span className="text-white/90">
-                  {budget.initialBudget.toLocaleString('fr-FR')} € init. · {budget.totalSpent.toLocaleString('fr-FR')} € dépensé · <strong>{budget.remaining.toLocaleString('fr-FR')} € reste</strong>
-                </span>
+                <dl className="grid grid-cols-3 gap-2 text-xs text-white/80">
+                  <div>
+                    <dt>Budget initial</dt>
+                    <dd className="font-semibold text-white">{budget.initialBudget.toLocaleString('fr-FR')} €</dd>
+                  </div>
+                  <div>
+                    <dt>Dépensé</dt>
+                    <dd className="font-semibold text-white">{budget.totalSpent.toLocaleString('fr-FR')} €</dd>
+                  </div>
+                  <div>
+                    <dt>Reste</dt>
+                    <dd className="font-semibold text-white">{budget.remaining.toLocaleString('fr-FR')} €</dd>
+                  </div>
+                </dl>
               ) : (
                 <span className="text-white/60 text-xs">Mois non préparé</span>
               )}
@@ -262,73 +279,266 @@ export default function Dashboard() {
         </ul>
       </section>
 
-      {pocketsWithTarget.length > 0 && (
-        <section className="bg-white rounded-card p-5 shadow-sm">
-          <h2 className="font-semibold mb-3">Mes projets</h2>
-          <ul className="space-y-4">
-            {pocketsWithTarget.map((p) => {
-              const ratio = Math.min(1, Number(p.balance) / Number(p.target_amount));
-              const remaining = Math.max(0, Number(p.target_amount) - Number(p.balance));
-              return (
-                <li key={p.id}>
-                  <div className="flex justify-between text-sm mb-1">
-                    <span className="font-medium">
-                      {p.icon} {p.name}
-                      {p.target_date && (
-                        <span className="text-ink/40 font-normal">
-                          {' '}· {new Date(p.target_date).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}
-                        </span>
-                      )}
-                    </span>
-                    <span className="text-ink/60">
-                      {Number(p.balance).toLocaleString('fr-FR')} € / {Number(p.target_amount).toLocaleString('fr-FR')} €
-                    </span>
-                  </div>
-                  <div className="h-2 rounded-full bg-teal-light overflow-hidden">
-                    <div
-                      className="h-full bg-teal rounded-full transition-all"
-                      style={{ width: `${Math.round(ratio * 100)}%` }}
-                    />
-                  </div>
-                  {remaining > 0 && (
-                    <p className="text-xs text-ink/40 mt-1">Il reste {remaining.toLocaleString('fr-FR')} € à mettre de côté</p>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        </section>
-      )}
+      <ProjectsCard profile={profile} projects={projects} onChanged={loadProjects} />
 
-      {myBudget && (
+      {memberBudgets.length > 0 && (
         <section className="bg-white rounded-card p-5 shadow-sm">
           <div className="flex justify-between items-center mb-3">
-            <h2 className="font-semibold">Mon budget</h2>
+            <h2 className="font-semibold">Budget</h2>
             <Link to="/preparer" className="text-xs text-teal underline">
               Modifier ma préparation
             </Link>
           </div>
-          <dl className="text-sm divide-y divide-teal-light">
-            <Row label="Revenus" value={myBudget.totalIncome} />
-            <Row label="Charges fixes" value={-myBudget.totalFixedCharges} />
-            <Row label="Épargne prévue" value={-myBudget.totalPlannedSavings} />
-            <Row label="Marge de sécurité" value={-myBudget.safetyMargin} />
-            <Row label="Dépenses" value={-myBudget.totalSpent} strong />
-          </dl>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr>
+                  <th className="text-left font-normal text-ink/50 text-xs pb-2"></th>
+                  {memberBudgets.map(({ member }) => (
+                    <th key={member.id} className="text-right font-medium text-xs pb-2 pl-3">{member.display_name}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-teal-light">
+                <BudgetRow label="Revenus" memberBudgets={memberBudgets} getValue={(b) => b.totalIncome} />
+                <BudgetRow label="Charges fixes" memberBudgets={memberBudgets} getValue={(b) => -b.totalFixedCharges} />
+                <BudgetRow label="Épargne prévue" memberBudgets={memberBudgets} getValue={(b) => -b.totalPlannedSavings} />
+                <BudgetRow label="Marge de sécurité" memberBudgets={memberBudgets} getValue={(b) => -b.safetyMargin} />
+                <BudgetRow label="Dépenses" memberBudgets={memberBudgets} getValue={(b) => -b.totalSpent} strong />
+              </tbody>
+            </table>
+          </div>
         </section>
       )}
     </div>
   );
 }
 
-function Row({ label, value, strong }) {
-  const positive = value >= 0;
+function BudgetRow({ label, memberBudgets, getValue, strong }) {
   return (
-    <div className="flex justify-between py-2">
-      <span className={strong ? 'font-semibold' : 'text-ink/70'}>{label}</span>
-      <span className={`font-medium ${positive ? 'text-teal' : 'text-coral'}`}>
-        {positive ? '+' : ''}{value.toLocaleString('fr-FR')} €
-      </span>
-    </div>
+    <tr>
+      <td className={`py-2 ${strong ? 'font-semibold' : 'text-ink/70'}`}>{label}</td>
+      {memberBudgets.map(({ member, budget }) => {
+        if (!budget) {
+          return <td key={member.id} className="py-2 pl-3 text-right text-ink/30 text-xs">—</td>;
+        }
+        const value = getValue(budget);
+        const positive = value >= 0;
+        return (
+          <td key={member.id} className={`py-2 pl-3 text-right font-medium ${positive ? 'text-teal' : 'text-coral'}`}>
+            {positive ? '+' : ''}{value.toLocaleString('fr-FR')} €
+          </td>
+        );
+      })}
+    </tr>
+  );
+}
+
+/**
+ * "Mes projets" — totalement indépendant des comptes et d'"Objectifs du
+ * mois" (§ demande explicite après confusion). Un simple but chiffré,
+ * qu'on alimente manuellement (ex. argent physique mis de côté dans une
+ * boîte à la maison) ; ne touche jamais le budget ni aucun compte.
+ */
+function ProjectsCard({ profile, projects, onChanged }) {
+  const [creating, setCreating] = useState(false);
+  const [contributingId, setContributingId] = useState(null);
+  const [error, setError] = useState('');
+
+  async function handleCreate({ name, targetAmount, targetDate, isPrivate }) {
+    setError('');
+    try {
+      await createProject({
+        householdId: profile.household_id,
+        ownerId: profile.id,
+        name,
+        targetAmount,
+        targetDate,
+        isPrivate,
+      });
+      setCreating(false);
+      await onChanged();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function handleContribute(project, amount) {
+    setError('');
+    try {
+      await contributeToProject(project, amount);
+      setContributingId(null);
+      await onChanged();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  return (
+    <section className="bg-white rounded-card p-5 shadow-sm">
+      <div className="flex justify-between items-center mb-3">
+        <h2 className="font-semibold">Mes projets</h2>
+        <button onClick={() => setCreating(!creating)} className="text-lg" aria-label="Ajouter un projet">
+          ✏️
+        </button>
+      </div>
+
+      {error && <p className="text-coral text-xs text-center mb-2">{error}</p>}
+
+      {creating && (
+        <ProjectForm onCancel={() => setCreating(false)} onSubmit={handleCreate} />
+      )}
+
+      {projects.length === 0 && !creating && (
+        <p className="text-sm text-ink/40">Aucun projet pour l'instant — appuyez sur ✏️ pour en créer un.</p>
+      )}
+
+      <ul className="space-y-4">
+        {projects.map((p) => {
+          const ratio = Math.min(1, Number(p.current_amount) / Number(p.target_amount));
+          const remaining = Math.max(0, Number(p.target_amount) - Number(p.current_amount));
+          const canManage = !p.is_private || p.owner_id === profile.id;
+          return (
+            <li key={p.id}>
+              <div className="flex justify-between text-sm mb-1">
+                <span className="font-medium">
+                  {p.name}
+                  {p.is_private && <span className="text-ink/30 text-xs"> · privé</span>}
+                  {p.target_date && (
+                    <span className="text-ink/40 font-normal">
+                      {' '}· {new Date(p.target_date).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}
+                    </span>
+                  )}
+                </span>
+                <span className="text-ink/60">
+                  {Number(p.current_amount).toLocaleString('fr-FR')} € / {Number(p.target_amount).toLocaleString('fr-FR')} €
+                </span>
+              </div>
+              <div className="h-2 rounded-full bg-teal-light overflow-hidden">
+                <div className="h-full bg-teal rounded-full transition-all" style={{ width: `${Math.round(ratio * 100)}%` }} />
+              </div>
+              {remaining > 0 && (
+                <p className="text-xs text-ink/40 mt-1">Il reste {remaining.toLocaleString('fr-FR')} € à mettre de côté</p>
+              )}
+              {canManage && (
+                <>
+                  <button
+                    onClick={() => setContributingId(contributingId === p.id ? null : p.id)}
+                    className="text-teal text-xs font-semibold mt-1"
+                  >
+                    {contributingId === p.id ? 'Annuler' : '+ Verser'}
+                  </button>
+                  {contributingId === p.id && (
+                    <ContributeForm onSubmit={(amount) => handleContribute(p, amount)} />
+                  )}
+                </>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+function ProjectForm({ onSubmit, onCancel }) {
+  const [name, setName] = useState('');
+  const [targetAmount, setTargetAmount] = useState('');
+  const [targetDate, setTargetDate] = useState('');
+  const [isPrivate, setIsPrivate] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    const value = Number(targetAmount.replace(',', '.'));
+    if (!name || !value) return;
+    setSubmitting(true);
+    await onSubmit({ name, targetAmount: value, targetDate, isPrivate });
+    setSubmitting(false);
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="border border-teal-light rounded-2xl p-3 space-y-2 mb-4">
+      <input
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder="Nom du projet (ex. Achat tablette)"
+        required
+        autoFocus
+        className="w-full bg-cream rounded-xl px-3 py-2 border border-teal-light text-sm"
+      />
+      <div className="relative">
+        <input
+          inputMode="decimal"
+          value={targetAmount}
+          onChange={(e) => setTargetAmount(e.target.value)}
+          placeholder="Somme visée"
+          required
+          className="w-full bg-cream rounded-xl px-3 py-2 pr-6 border border-teal-light text-sm"
+        />
+        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-ink/40 text-xs">€</span>
+      </div>
+      <div>
+        <label className="text-xs text-ink/60">Date limite (optionnel)</label>
+        <input
+          type="date"
+          value={targetDate}
+          onChange={(e) => setTargetDate(e.target.value)}
+          className="w-full mt-1 bg-cream rounded-xl px-3 py-2 border border-teal-light text-sm"
+        />
+      </div>
+      <label className="flex items-center gap-2 text-xs text-ink/60">
+        <input type="checkbox" checked={isPrivate} onChange={(e) => setIsPrivate(e.target.checked)} />
+        Projet privé (visible de moi seul·e)
+      </label>
+      <div className="flex gap-2">
+        <button type="button" onClick={onCancel} className="flex-1 text-sm text-ink/50 py-2">Annuler</button>
+        <button
+          type="submit"
+          disabled={submitting}
+          className="flex-1 bg-teal text-white text-sm font-semibold rounded-xl py-2 disabled:opacity-50"
+        >
+          Créer
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function ContributeForm({ onSubmit }) {
+  const [amount, setAmount] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    const value = Number(amount.replace(',', '.'));
+    if (!value || value <= 0) return;
+    setSubmitting(true);
+    await onSubmit(value);
+    setSubmitting(false);
+    setAmount('');
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="mt-2 flex gap-2">
+      <div className="relative flex-1">
+        <input
+          inputMode="decimal"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          placeholder="Montant versé"
+          autoFocus
+          className="w-full bg-cream rounded-xl px-3 py-2 pr-6 border border-teal-light text-sm"
+        />
+        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-ink/40 text-xs">€</span>
+      </div>
+      <button
+        type="submit"
+        disabled={submitting}
+        className="bg-teal text-white text-sm font-semibold rounded-xl px-4 disabled:opacity-50"
+      >
+        OK
+      </button>
+    </form>
   );
 }
