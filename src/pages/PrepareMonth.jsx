@@ -282,6 +282,16 @@ export default function PrepareMonth() {
 
   if (loading) return <p className="text-center text-ink/50 mt-20">Chargement…</p>;
 
+  if (error && !month) {
+    return (
+      <div className="text-center mt-20 px-4">
+        <p className="text-4xl mb-2">⚠️</p>
+        <p className="font-semibold mb-2">Impossible de charger Préparer mon mois</p>
+        <p className="text-sm text-coral bg-coral-light rounded-xl px-4 py-3 break-words">{error}</p>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-5 pb-4">
       <header>
