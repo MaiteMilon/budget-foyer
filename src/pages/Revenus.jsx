@@ -33,18 +33,25 @@ export default function Revenus() {
   const [form, setForm] = useState(emptyForm());
   const [pendingScopeChoice, setPendingScopeChoice] = useState(null);
   const [error, setError] = useState('');
+  const [loadError, setLoadError] = useState(null);
   const [saving, setSaving] = useState(false);
   const [ponctualDone, setPonctualDone] = useState(false);
 
   async function load() {
     setLoading(true);
-    const [list, entries] = await Promise.all([
-      getMyRecurringIncomes(profile.id),
-      getCurrentMonthEntriesByIncome(currentBudgetMonth.id),
-    ]);
-    setIncomes(list);
-    setEntriesByIncome(entries);
-    setLoading(false);
+    setLoadError(null);
+    try {
+      const [list, entries] = await Promise.all([
+        getMyRecurringIncomes(profile.id),
+        getCurrentMonthEntriesByIncome(currentBudgetMonth.id),
+      ]);
+      setIncomes(list);
+      setEntriesByIncome(entries);
+    } catch (err) {
+      setLoadError(err.message || String(err));
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => { load(); }, [profile.id, currentBudgetMonth.id]);
@@ -181,6 +188,16 @@ export default function Revenus() {
     } finally {
       setSaving(false);
     }
+  }
+
+  if (loadError) {
+    return (
+      <div className="text-center mt-20 px-4">
+        <p className="text-4xl mb-2">⚠️</p>
+        <p className="font-semibold mb-2">Impossible de charger Revenus</p>
+        <p className="text-sm text-coral bg-coral-light rounded-xl px-4 py-3 break-words">{loadError}</p>
+      </div>
+    );
   }
 
   if (loading) return <p className="text-center text-ink/50 mt-20">Chargement…</p>;
