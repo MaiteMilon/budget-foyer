@@ -188,15 +188,6 @@ export default function Dashboard() {
         </Link>
       )}
 
-      {nextMonthToPrep && (
-        <Link
-          to={`/preparer?month=${nextMonthToPrep}`}
-          className="block bg-teal-light text-teal-dark rounded-card px-4 py-3 text-sm font-semibold"
-        >
-          💰 J'ai reçu mon salaire — préparer {monthLabel(nextMonthToPrep)} →
-        </Link>
-      )}
-
       <section className="bg-teal text-white rounded-card p-6 shadow-sm">
         <p className="text-sm text-white/80 font-medium">Reste à dépenser du foyer</p>
         {householdTotals ? (
@@ -260,6 +251,16 @@ export default function Dashboard() {
         </div>
       </section>
 
+      {nextMonthToPrep && (
+        <Link
+          to={`/preparer?month=${nextMonthToPrep}`}
+          className="flex items-center gap-3 bg-amber text-white rounded-card px-4 py-3 text-sm font-semibold shadow-sm"
+        >
+          <span className="flex-shrink-0 w-10 h-10 rounded-full bg-teal-dark flex items-center justify-center text-xl">💰</span>
+          <span>J'ai reçu mon salaire — préparer {monthLabel(nextMonthToPrep)} →</span>
+        </Link>
+      )}
+
       {depenseAccounts.length > 0 && (
         <section className="bg-white rounded-card p-5 shadow-sm">
           <div className="flex justify-between items-center mb-3">
@@ -311,7 +312,7 @@ export default function Dashboard() {
                     style={{ width: `${Math.round(progress.ratio * 100)}%` }}
                   />
                 </div>
-                <p className="text-xs text-ink/40 mt-1">
+                <p className={`text-xs mt-1 font-medium ${Number(pocket.balance) > 0 ? 'text-teal' : 'text-coral'}`}>
                   Solde actuel du compte : {Number(pocket.balance).toLocaleString('fr-FR')} €
                 </p>
                 {perMember.length > 1 && (
@@ -384,7 +385,7 @@ function BudgetRow({ label, memberBudgets, getValue, strong }) {
         const value = getValue(budget);
         const positive = value >= 0;
         return (
-          <td key={member.id} className={`py-2 pl-3 text-right font-medium ${positive ? 'text-teal' : 'text-coral'}`}>
+          <td key={member.id} className={`py-2 pl-3 text-right font-medium whitespace-nowrap ${positive ? 'text-teal' : 'text-coral'}`}>
             {positive ? '+' : ''}{value.toLocaleString('fr-FR')} €
           </td>
         );

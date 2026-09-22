@@ -9,6 +9,7 @@ import {
   getMonthIncomes,
   getMonthSavingsGoals,
   getMonthFixedCharges,
+  getMonthExpenses,
   getHouseholdPockets,
   addPocket,
 } from '../lib/data.js';
